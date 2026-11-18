@@ -1,0 +1,77 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  html,body{margin:0;width:1024px;height:1024px;background:transparent;overflow:hidden}
+  canvas{display:block}
+</style></head>
+<body><canvas id="c" width="1024" height="1024"></canvas>
+<script>
+const ctx = document.getElementById('c').getContext('2d');
+const W = 1024, H = 1024;
+
+function roundRect(x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// 圓角底
+ctx.save();
+roundRect(44, 44, W - 88, H - 88, 210);
+ctx.clip();
+const bg = ctx.createLinearGradient(0, 0, 0, H);
+bg.addColorStop(0, '#05070f');
+bg.addColorStop(1, '#0b1a33');
+ctx.fillStyle = bg;
+ctx.fillRect(0, 0, W, H);
+
+// 星星
+for (let i = 0; i < 90; i++){
+  ctx.globalAlpha = 0.15 + Math.random() * 0.6;
+  ctx.fillStyle = '#dbeafe';
+  ctx.beginPath();
+  ctx.arc(Math.random() * W, Math.random() * H * 0.72, Math.random() * 2.4 + 0.6, 0, 6.2832);
+  ctx.fill();
+}
+ctx.globalAlpha = 1;
+
+// 極光帶
+ctx.globalCompositeOperation = 'lighter';
+const colors = ['#22d3ee', '#34d399', '#a78bfa'];
+colors.forEach((c, i) => {
+  const hex = c.replace('#','');
+  const n = parseInt(hex, 16);
+  const rgba = (a) => `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+  const baseY = H * (0.60 - i * 0.075);
+  const height = H * 0.42;
+  const g = ctx.createLinearGradient(0, baseY - height, 0, baseY + 200);
+  g.addColorStop(0, rgba(0));
+  g.addColorStop(0.35, rgba(0.7));
+  g.addColorStop(0.7, rgba(0.25));
+  g.addColorStop(1, rgba(0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 6){
+    const u = x / W;
+    const wave = Math.sin(u * 6.4 + i * 2.3) * 0.5 + Math.sin(u * 15 + i) * 0.22 + Math.sin(u * 2.1) * 0.38;
+    ctx.lineTo(x, baseY - height * 0.5 + wave * height * 0.45);
+  }
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  ctx.fill();
+});
+ctx.globalCompositeOperation = 'source-over';
+ctx.restore();
+
+// 外框
+ctx.save();
+roundRect(44, 44, W - 88, H - 88, 210);
+ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+ctx.lineWidth = 6;
+ctx.stroke();
+ctx.restore();
+</script></body></html>

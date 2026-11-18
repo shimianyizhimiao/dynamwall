@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>星海 Starfield</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#02030a;}
+  canvas{display:block;width:100%;height:100%;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/* ══════════════════════════════════════════════════════════
+   星海 Starfield ─ 動態壁紙（可自訂）
+   改下面的 CONFIG，存檔後桌面會「立刻」更新
+   ══════════════════════════════════════════════════════════ */
+const CONFIG = {
+  動畫速度:    1.0,      // 飛行速度倍率
+  星星數量:    760,
+  拖尾長度:    0.42,     // 0 = 點狀，接近 1 = 長長的光條
+  顏色:        ['#ffffff', '#a5b4fc', '#67e8f9', '#fbcfe8', '#fde68a'],
+  背景色:      '#02030a',
+  星雲:        true,     // 要不要背景星雲
+  星雲顏色:    ['#1d4ed8', '#6d28d9', '#0f766e', '#be185d'],
+  星雲速度:    0.06,
+  暗角強度:    0.5
+};
+
+const cv  = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1, cx = 0, cy = 0, stars = [], t = 0, last = 0;
+
+function hexA(hex, a){
+  const h = hex.replace('#','');
+  const n = parseInt(h.length === 3 ? h.split('').map(c=>c+c).join('') : h, 16);
+  return 'rgba(' + ((n>>16)&255) + ',' + ((n>>8)&255) + ',' + (n&255) + ',' + a + ')';
+}
+
+function spawn(st){
+  st.x = (Math.random() - 0.5) * 2;
+  st.y = (Math.random() - 0.5) * 2;
+  st.z = Math.random() * 0.9 + 0.1;
+  st.c = CONFIG.顏色[Math.floor(Math.random() * CONFIG.顏色.length)];
+  return st;
+}
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.floor(W * DPR); cv.height = Math.floor(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  cx = W / 2; cy = H / 2;
+  stars = Array.from({length: CONFIG.星星數量}, (_, i) => spawn({}));
+}
+window.addEventListener('resize', resize);
+
+function drawNebula(){
+  if (!CONFIG.星雲) return;
+  ctx.globalCompositeOperation = 'lighter';
+  const cols = CONFIG.星雲顏色;
+  for (let i = 0; i < cols.length; i++){
+    const ang = t * CONFIG.星雲速度 + i * 1.7;
+    const px = cx + Math.cos(ang * 1.3) * W * 0.26;
+    const py = cy + Math.sin(ang) * H * 0.24;
+    const r  = Math.max(W, H) * (0.28 + 0.06 * Math.sin(ang * 2.1 + i));
+    const g = ctx.createRadialGradient(px, py, 0, px, py, r);
+    g.addColorStop(0, hexA(cols[i], 0.30));
+    g.addColorStop(0.45, hexA(cols[i], 0.10));
+    g.addColorStop(1, hexA(cols[i], 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function frame(){
+  t += 0.012 * CONFIG.動畫速度;
+
+  // 背景（留一點上一格的殘影 = 拖尾）
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = 'rgba(2,3,10,' + (1 - CONFIG.拖尾長度) + ')';
+  ctx.fillRect(0, 0, W, H);
+  drawNebula();
+
+  // 星星往觀察者飛過來
+  ctx.globalCompositeOperation = 'lighter';
+  const speed = 0.016 * CONFIG.動畫速度;
+  for (const st of stars){
+    const z0 = st.z;
+    const x0 = st.x / z0, y0 = st.y / z0;
+    st.z -= speed;
+    if (st.z <= 0.06){ spawn(st); continue; }
+    const x1 = st.x / st.z, y1 = st.y / st.z;
+    const f = Math.min(W, H) * 0.55;
+    const sx0 = cx + x0 * f, sy0 = cy + y0 * f;
+    const sx1 = cx + x1 * f, sy1 = cy + y1 * f;
+    const depth = 1 - st.z;                    // 越近越亮
+    ctx.strokeStyle = hexA(st.c, Math.min(1, 0.25 + depth * 1.1));
+    ctx.lineWidth = 0.4 + depth * 2.2;
+    ctx.beginPath();
+    ctx.moveTo(sx0, sy0);
+    ctx.lineTo(sx1, sy1);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  // 暗角
+  const v = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.20, cx, cy, Math.max(W, H) * 0.75);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(0,0,0,' + CONFIG.暗角強度 + ')');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(frame);
+}
+
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

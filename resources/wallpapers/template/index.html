@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>自訂壁紙範本</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#07070c;}
+  canvas{display:block;width:100%;height:100%;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/* ══════════════════════════════════════════════════════════════════════
+   自訂動態壁紙範本 ── 想要自己的壁紙，改這個檔案就好
+   ══════════════════════════════════════════════════════════════════════
+
+   怎麼用（三步）：
+     1. 在「動態壁紙」選單列選：我的自訂壁紙 → 這個資料夾
+     2. 用文字編輯器（建議 VS Code）打開這個 index.html
+     3. 改下面的 CONFIG 或 frame() 裡的程式，存檔 → 桌面馬上變
+        （App 有監看檔案，存檔後自動重新載入，不用做任何事）
+
+   你可以用的東西：
+     • Canvas 2D（下面示範）、CSS 動畫、SVG、WebGL，甚至 <video> 都可以
+     • 想要滑鼠互動：選單列的「選項 → 允許滑鼠互動」打勾
+     • 同資料夾可以放自己的圖片 / 字型，用相對路徑引用即可，例如
+       url('photo.jpg')、new Image().src = 'cat.png'
+     • 想加音樂不行（壁紙不播音）；想放影片請直接用「選擇影片檔…」
+
+   幾個小訣竅：
+     • 盡量用 requestAnimationFrame(frame) 讓畫面每格更新
+     • 視窗大小變化時要重畫，所以監聽 window 的 resize
+     • 想省電：畫面元素少一點、或把 CONFIG 的 速度 降低
+   ══════════════════════════════════════════════════════════════════════ */
+
+const CONFIG = {
+  動畫速度:   1.0,
+  背景色:     '#07070c',
+  光球數量:   6,
+  光球半徑:   0.28,      // 佔畫面較短邊的比例
+  顏色:       ['#38bdf8', '#818cf8', '#f472b6', '#34d399', '#fbbf24', '#a78bfa'],
+  模糊程度:   0.7,       // 0~1，越大越柔
+  星點數量:   120,
+  跟隨滑鼠:   true        // 要先去選單打勾「允許滑鼠互動」
+};
+
+const cv  = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1, t = 0;
+let mouse = { x: 0.5, y: 0.5, has: false };
+
+// '#rrggbb' → 'rgba(r,g,b,a)'
+function hexA(hex, a){
+  const h = hex.replace('#','');
+  const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
+  return 'rgba(' + ((n>>16)&255) + ',' + ((n>>8)&255) + ',' + (n&255) + ',' + a + ')';
+}
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);   // 上限 2 倍，省資源
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.floor(W * DPR); cv.height = Math.floor(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize);
+
+window.addEventListener('mousemove', e => {
+  mouse.x = e.clientX / W; mouse.y = e.clientY / H; mouse.has = true;
+});
+
+const stars = [];
+function makeStars(){
+  stars.length = 0;
+  for (let i = 0; i < CONFIG.星點數量; i++){
+    stars.push({ x: Math.random(), y: Math.random(), r: Math.random() * 1.2 + 0.2, p: Math.random() * 6.28 });
+  }
+}
+
+function frame(){
+  t += 0.016 * CONFIG.動畫速度;
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = CONFIG.背景色;
+  ctx.fillRect(0, 0, W, H);
+
+  // 星點
+  for (const s of stars){
+    ctx.globalAlpha = 0.25 + 0.55 * Math.abs(Math.sin(t * 1.6 + s.p));
+    ctx.fillStyle = '#e2e8f0';
+    ctx.beginPath();
+    ctx.arc(s.x * W, s.y * H, s.r, 0, 6.2832);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // 會呼吸、會飄的光球（用疊加混色做出柔光）
+  ctx.globalCompositeOperation = 'lighter';
+  const R = Math.min(W, H) * CONFIG.光球半徑;
+  for (let i = 0; i < CONFIG.光球數量; i++){
+    const p = i / CONFIG.光球數量;
+    let px = 0.5 + 0.34 * Math.sin(t * (0.32 + p * 0.22) + p * 6.28);
+    let py = 0.5 + 0.30 * Math.cos(t * (0.26 + p * 0.31) + p * 4.1);
+    if (CONFIG.跟隨滑鼠 && mouse.has){
+      px += (mouse.x - 0.5) * 0.18 * (0.4 + p);
+      py += (mouse.y - 0.5) * 0.18 * (0.4 + p);
+    }
+    const r = R * (0.75 + 0.35 * Math.sin(t * 0.7 + p * 5));
+    const cx = px * W, cy = py * H;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    const c = CONFIG.顏色[i % CONFIG.顏色.length];
+    g.addColorStop(0, hexA(c, 0.55));
+    g.addColorStop(CONFIG.模糊程度 * 0.5, hexA(c, 0.18));
+    g.addColorStop(1, hexA(c, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  requestAnimationFrame(frame);
+}
+
+resize();
+makeStars();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

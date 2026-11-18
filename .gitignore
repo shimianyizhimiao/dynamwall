@@ -1,0 +1,31 @@
+# 打包產物
+build/
+build-standalone/
+build-dmg/
+*.app
+*.dmg
+*.dmg.bg/
+*.zip
+*.pkg
+
+# 產生出來的資源（build.sh 會自動重做）
+resources/thumbs/*.jpg
+resources/posters/*.jpg
+
+# 個人筆記 / 截圖 / 執行紀錄
+README.private.md
+預覽圖/
+*.log
+logs/
+
+# macOS
+.DS_Store
+._*
+
+# Xcode / SwiftPM
+.build/
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+預覽圖/
+*.dmg.bg/
