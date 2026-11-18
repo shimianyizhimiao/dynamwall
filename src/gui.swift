@@ -39,12 +39,34 @@ let IMAGE_EXTS: Set<String> = ["gif", "png", "jpg", "jpeg", "heic", "webp", "bmp
 
 // MARK: ───────────────────────── 掃描壁紙庫
 
+let STATIC_THEME_NAMES: [String: String] = [
+    "nebula": "星雲", "earth": "地球", "aurora": "極光", "galaxy": "星系",
+    "moon": "月球", "mars": "火星", "ocean": "海洋", "city": "城市夜景",
+    "himalaya": "喜馬拉雅", "jupiter": "木星",
+]
+
+/// App 內附的精選靜態壁紙（NASA 公有領域，見 Resources/wallpapers/static/CREDITS.md）
+func builtinStaticFiles() -> [URL] {
+    guard let dir = Bundle.main.url(forResource: "static", withExtension: nil, subdirectory: "wallpapers") else { return [] }
+    let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+    return files.filter { $0.pathExtension.lowercased() == "jpg" }
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
+}
+
 func scanLibrary() -> [WallpaperItem] {
     var out: [WallpaperItem] = []
     for id in builtinIDs() {
         out.append(WallpaperItem(id: "builtin:\(id)", kind: "builtin", ref: id,
                                  title: BUILTIN_TITLES[id] ?? id,
                                  subtitle: "內建動態壁紙", canDelete: false))
+    }
+    for u in builtinStaticFiles() {
+        let slug = u.deletingPathExtension().lastPathComponent
+        let theme = slug.split(separator: "-").first.map(String.init) ?? slug
+        let name = STATIC_THEME_NAMES[theme] ?? slug
+        let rel = "@bundle:wallpapers/static/\(u.lastPathComponent)"
+        out.append(WallpaperItem(id: "image:\(rel)", kind: "image", ref: rel,
+                                 title: "NASA・\(name)", subtitle: "精選靜態・公有領域", canDelete: false))
     }
     try? fm.createDirectory(at: LIBRARY_DIR, withIntermediateDirectories: true)
     if let items = try? fm.contentsOfDirectory(at: LIBRARY_DIR, includingPropertiesForKeys: nil) {
@@ -108,8 +130,9 @@ final class Thumbnailer {
         case "video":
             videoThumb(URL(fileURLWithPath: item.ref), size: size, done: done)
         case "image":
-            if let img = NSImage(contentsOfFile: item.ref) {
-                done(img, imageInfo(URL(fileURLWithPath: item.ref)))
+            let path = resolveRef(item.ref)
+            if let img = NSImage(contentsOfFile: path) {
+                done(img, imageInfo(URL(fileURLWithPath: path)))
             } else { done(nil, nil) }
         default:
             webSnapshot(URL(fileURLWithPath: item.ref), size: size, done: done)
@@ -261,6 +284,8 @@ final class Engine {
     func setAutoStart(_ v: Bool) { app?.guiSetAutoStart(v) }
     func setPoster(_ v: Bool) { app?.guiSetPoster(v) }
     func setParallax(_ on: Bool, _ amount: Double) { app?.guiSetParallax(on, amount) }
+    func setRotation(_ on: Bool, _ minutes: Double) { app?.guiSetRotation(on, minutes) }
+    func setPauseOnFullscreen(_ on: Bool) { app?.guiSetPauseOnFullscreen(on) }
 }
 
 // MARK: ───────────────────────── 資料模型

@@ -83,11 +83,14 @@ struct Config: Codable {
     var poster = true         // 套用壁紙時，同步把「靜態海報圖」設成系統桌布（關掉 App 後桌面仍是同一張）
     var parallaxOn = false    // 視差：預設關閉（想要景深感的使用者自己在設定裡開）
     var parallax = 10.0       // 位移幅度（像素）；壁紙會先放大一點避免露邊
+    var rotationOn = false    // 定時換壁紙（輪換整個壁紙庫）
+    var rotationMinutes = 30.0
+    var pauseOnFullscreen = true   // 有 App 全螢幕時暫停壁紙，省電
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case kind, ref, mute, rate, gravity, dim, interactive, paused, autoStart, poster, parallaxOn, parallax
+        case kind, ref, mute, rate, gravity, dim, interactive, paused, autoStart, poster, parallaxOn, parallax, rotationOn, rotationMinutes, pauseOnFullscreen
     }
 
     init(from decoder: Decoder) throws {
@@ -104,6 +107,9 @@ struct Config: Codable {
         poster = (try? c.decode(Bool.self, forKey: .poster)) ?? true
         parallaxOn = (try? c.decode(Bool.self, forKey: .parallaxOn)) ?? false
         parallax = (try? c.decode(Double.self, forKey: .parallax)) ?? 10.0
+        rotationOn = (try? c.decode(Bool.self, forKey: .rotationOn)) ?? false
+        rotationMinutes = (try? c.decode(Double.self, forKey: .rotationMinutes)) ?? 30.0
+        pauseOnFullscreen = (try? c.decode(Bool.self, forKey: .pauseOnFullscreen)) ?? true
     }
 }
 
@@ -945,6 +951,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var screens: [ScreenWallpaper] = []
     var statusItem: NSStatusItem!
     var parallaxTimer: Timer?
+    var rotationTimer: Timer?
+    var pausedByFullscreen = false
     var lastParallaxLog = Date.distantPast
     var pausedBySystem = false
     var systemHidden = false
@@ -1000,6 +1008,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if CommandLine.arguments.contains("--gui-test") {
             runGUITest()
         }
+        if CommandLine.arguments.contains("--list-library") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                let items = scanLibrary()
+                say("LIST count=\(items.count)")
+                for it in items { say("LIST \(it.kind) | \(it.title) | \(it.ref)") }
+                let ids = items.map { $0.id }
+                let dup = Dictionary(grouping: ids, by: { $0 }).filter { $0.value.count > 1 }
+                say("LIST duplicates=\(dup.count)")
+            }
+        }
         if CommandLine.arguments.contains("--tour-test") {
             runTourTest()
         }
@@ -1043,6 +1061,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         say("READY screens=\(screens.count) kind=\(cfg.kind) ref=\(cfg.ref) level=\(screens.first?.window.level.rawValue ?? 0)")
         startParallax()
+        startRotation()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -1061,6 +1080,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         parallaxTimer?.invalidate()
         parallaxTimer = nil
+        rotationTimer?.invalidate()
+        rotationTimer = nil
         for s in screens { s.teardownContent() }
         if let a = activity { ProcessInfo.processInfo.endActivity(a) }
     }
@@ -1189,6 +1210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             return   // 只暫停播放，不把視窗收起來（收起來才會露出桌面定格圖）
         }
         if systemHidden { hideWallpaper(false) }       // 醒來就把視窗放回來（通知漏接也靠這裡）
+        checkFullscreenPause()
         for sw in screens {
             // 不要在這裡盲目 orderFrontRegardless：全螢幕空間、螢幕剛醒時 isVisible 會是 false，
             // 每 3 秒重排一次視窗就會變成「規律頻閃」。真的不見了再處理，而且最多 30 秒一次。
@@ -1859,6 +1881,86 @@ extension AppDelegate {
             NSApp.setActivationPolicy(.accessory)
             say("LIBRARY-CLOSE")
         }
+    }
+
+    // MARK: 定時輪換
+
+    func startRotation() {
+        rotationTimer?.invalidate()
+        rotationTimer = nil
+        guard cfg.rotationOn, cfg.rotationMinutes >= 0.02 else { say("ROTATION off"); return }
+        let t = Timer(timeInterval: cfg.rotationMinutes * 60, repeats: true) { [weak self] _ in
+            self?.rotateNext()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        rotationTimer = t
+        say("ROTATION on every=\(cfg.rotationMinutes)min items=\(scanLibrary().count)")
+    }
+
+    func rotateNext() {
+        let items = scanLibrary()
+        guard !items.isEmpty else { return }
+        let cur = items.firstIndex { $0.kind == cfg.kind && resolveRef($0.ref) == resolveRef(cfg.ref) } ?? -1
+        let next = items[(cur + 1) % items.count]
+        say("ROTATION next=\(next.title) kind=\(next.kind)")
+        guiApply(kind: next.kind, ref: next.ref)
+    }
+
+    func guiSetRotation(_ on: Bool, _ minutes: Double) {
+        cfg.rotationOn = on
+        cfg.rotationMinutes = minutes
+        saveConfig(cfg)
+        startRotation()
+    }
+
+    // MARK: 全螢幕偵測（有 App 全螢幕就暫停壁紙）
+
+    func isFullscreenAppActive() -> Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication,
+              front.bundleIdentifier != Bundle.main.bundleIdentifier else { return false }
+        let pid = front.processIdentifier
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                    kCGNullWindowID) as? [[String: Any]] else { return false }
+        let target = NSScreen.main?.frame ?? .zero
+        for w in list {
+            guard (w[kCGWindowOwnerPID as String] as? pid_t) == pid,
+                  let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
+            let r = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+            if abs(r.width - target.width) < 4 && abs(r.height - target.height) < 4 { return true }
+        }
+        return false
+    }
+
+    func checkFullscreenPause() {
+        guard cfg.pauseOnFullscreen else {
+            if pausedByFullscreen {
+                pausedByFullscreen = false
+                resumeAllScreens()
+            }
+            return
+        }
+        let full = isFullscreenAppActive()
+        if full != pausedByFullscreen {
+            pausedByFullscreen = full
+            say("FULLSCREEN pause=\(full)")
+            if full {
+                for sw in screens { sw.pauseContent() }
+            } else {
+                resumeAllScreens()
+            }
+        }
+    }
+
+    /// 恢復播放（但使用者自己按暫停、或系統睡眠中就不要硬開）
+    func resumeAllScreens() {
+        guard !cfg.paused, !pausedBySystem else { return }
+        for sw in screens { sw.resumeContent() }
+    }
+
+    func guiSetPauseOnFullscreen(_ on: Bool) {
+        cfg.pauseOnFullscreen = on
+        saveConfig(cfg)
+        if !on { pausedByFullscreen = false; resumeAllScreens() } else { checkFullscreenPause() }
     }
 
     // MARK: 視差

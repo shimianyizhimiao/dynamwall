@@ -165,6 +165,25 @@ struct SettingsView: View {
                 Text("壁紙會先放大一點，所以位移時不會露出黑邊；影片、圖片、HTML 都適用。")
                     .font(.system(size: 11)).foregroundColor(.secondary)
             } header: { Text("視差（景深）") }
+
+            Section {
+                toggleRow("定時自動換壁紙", "時間到就換成壁紙庫裡的下一張，一直循環。",
+                          Binding(get: { cfg.rotationOn },
+                                  set: { cfg.rotationOn = $0; Engine.shared.setRotation($0, cfg.rotationMinutes); reload() }))
+                Picker("間隔", selection: Binding(
+                    get: { Int(cfg.rotationMinutes) },
+                    set: { cfg.rotationMinutes = Double($0); Engine.shared.setRotation(cfg.rotationOn, cfg.rotationMinutes); reload() })) {
+                    Text("5 分鐘").tag(5)
+                    Text("15 分鐘").tag(15)
+                    Text("30 分鐘").tag(30)
+                    Text("1 小時").tag(60)
+                    Text("3 小時").tag(180)
+                }
+                .disabled(!cfg.rotationOn)
+                toggleRow("全螢幕時暫停", "看影片、玩遊戲開全螢幕時把壁紙停住，省電也省顯卡。",
+                          Binding(get: { cfg.pauseOnFullscreen },
+                                  set: { cfg.pauseOnFullscreen = $0; Engine.shared.setPauseOnFullscreen($0); reload() }))
+            } header: { Text("自動化（省電）") }
         }
         .formStyle(.grouped)
     }
