@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>動態壁紙 · DynWall — macOS 的原生動態壁紙引擎</title>
+<meta name="description" content="影片、GIF、圖片、自己寫的 HTML 都能變成 macOS 壁紙，畫在桌布之上、圖示之下。Swift 原生、開源、可打包成獨立 App。">
+<style>
+  :root {
+    --bg: #08090c;
+    --panel: rgba(255,255,255,.045);
+    --panel-2: rgba(255,255,255,.07);
+    --line: rgba(255,255,255,.09);
+    --text: #eef1f6;
+    --dim: #9aa3b2;
+    --accent: #6aa6ff;
+    --accent-2: #b58bff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro TC", "PingFang TC", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  .glow { position: fixed; inset: -30% -10% auto; height: 80vh; pointer-events: none; z-index: 0;
+    background: radial-gradient(60% 55% at 25% 15%, rgba(106,166,255,.28), transparent 70%),
+                radial-gradient(50% 50% at 80% 0%, rgba(181,139,255,.22), transparent 70%);
+    filter: blur(10px); }
+  .wrap { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 24px 96px; }
+  nav { display: flex; align-items: center; gap: 22px; padding: 22px 0; font-size: 14px; color: var(--dim); }
+  nav .brand { color: var(--text); font-weight: 700; letter-spacing: .2px; margin-right: auto; display: flex; align-items: center; gap: 10px; }
+  nav .dot { width: 10px; height: 10px; border-radius: 3px; background: linear-gradient(140deg, var(--accent), var(--accent-2)); }
+  nav a { text-decoration: none; }
+  nav a:hover { color: var(--text); }
+  header { padding: 64px 0 40px; text-align: center; }
+  .tag { display: inline-block; font-size: 12px; color: var(--dim); border: 1px solid var(--line);
+    background: var(--panel); padding: 6px 12px; border-radius: 999px; margin-bottom: 22px; }
+  h1 { font-size: clamp(34px, 5.4vw, 60px); line-height: 1.08; margin: 0 0 18px; letter-spacing: -.02em; }
+  h1 span { background: linear-gradient(100deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: clamp(15px, 1.6vw, 18px); line-height: 1.75; color: var(--dim); max-width: 720px; margin: 0 auto 30px; }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; font-size: 15px;
+    padding: 12px 22px; border-radius: 12px; border: 1px solid var(--line); transition: .18s; }
+  .btn.primary { background: linear-gradient(180deg, #7fb0ff, #4f86e8); color: #05070b; font-weight: 700; border-color: transparent;
+    box-shadow: 0 10px 30px rgba(79,134,232,.35); }
+  .btn.primary:hover { transform: translateY(-1px); }
+  .btn.ghost { color: var(--text); background: var(--panel); }
+  .btn.ghost:hover { background: var(--panel-2); }
+  .shot { margin: 54px 0 0; border-radius: 18px; overflow: hidden; border: 1px solid var(--line);
+    background: var(--panel); box-shadow: 0 40px 80px rgba(0,0,0,.55); }
+  .shot img { display: block; width: 100%; height: auto; }
+  .shot figcaption { font-size: 12.5px; color: var(--dim); padding: 12px 16px; border-top: 1px solid var(--line); }
+  h2 { font-size: clamp(22px, 3vw, 30px); letter-spacing: -.01em; margin: 88px 0 8px; }
+  .lead { color: var(--dim); margin: 0 0 26px; font-size: 15px; line-height: 1.7; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px 20px 18px; }
+  .card h3 { margin: 0 0 8px; font-size: 15.5px; }
+  .card p { margin: 0; color: var(--dim); font-size: 13.5px; line-height: 1.75; }
+  .card .ico { font-size: 19px; margin-bottom: 12px; opacity: .9; }
+  .two { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; }
+  .steps li { counter-increment: s; position: relative; padding: 0 0 18px 44px; color: var(--dim); font-size: 14px; line-height: 1.7; }
+  .steps li::before { content: counter(s); position: absolute; left: 0; top: -2px; width: 28px; height: 28px; border-radius: 9px;
+    display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #05070b;
+    background: linear-gradient(140deg, var(--accent), var(--accent-2)); }
+  .steps b { color: var(--text); font-weight: 650; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    background: rgba(255,255,255,.07); border: 1px solid var(--line); padding: 2px 6px; border-radius: 6px; }
+  .note { border-left: 3px solid var(--accent); background: rgba(106,166,255,.08); border-radius: 0 12px 12px 0;
+    padding: 14px 16px; color: var(--dim); font-size: 13.5px; line-height: 1.75; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); color: var(--dim); }
+  th { color: var(--text); font-weight: 600; }
+  footer { margin-top: 80px; padding-top: 26px; border-top: 1px solid var(--line); color: var(--dim); font-size: 12.5px; line-height: 1.9; }
+  footer a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="wrap">
+
+  <nav>
+    <div class="brand"><span class="dot"></span>DynWall 動態壁紙</div>
+    <a href="#features">功能</a>
+    <a href="#shots">畫面</a>
+    <a href="#install">安裝</a>
+    <a href="#license">授權</a>
+    <a href="https://github.com/" id="repo-link">GitHub ↗</a>
+  </nav>
+
+  <header>
+    <div class="tag">macOS 13+ · Swift 原生 · 無第三方依賴 · 開源</div>
+    <h1>你的桌面，<span>不該是一張靜止的圖</span></h1>
+    <p class="sub">
+      影片、GIF、圖片，或是你自己寫的 HTML/CSS/JS —— 通通可以變成 macOS 壁紙。<br>
+      畫在系統桌布之上、桌面圖示之下：圖示照樣點、檔案照樣拖、Mission Control 照樣用。
+    </p>
+    <div class="cta">
+      <a class="btn primary" id="dl-btn" href="https://github.com/">下載最新版 .dmg</a>
+      <a class="btn ghost" id="src-btn" href="https://github.com/">看原始碼</a>
+    </div>
+
+    <figure class="shot">
+      <img src="preview/home.jpg" alt="動態壁紙的壁紙庫：上方大張即時預覽，下面是一列列可橫向滑動的壁紙卡片">
+      <figcaption>壁紙庫：上方是<b>真的在播</b>的大張預覽，下面三列卡片可以左右滑，滑過去看「設為桌布」。</figcaption>
+    </figure>
+  </header>
+
+  <h2 id="features">功能</h2>
+  <p class="lead">不是「換一張圖」，是把整個桌面換成一個可以跑東西的畫布。</p>
+  <div class="grid">
+    <div class="card"><div class="ico">🎞</div><h3>四種來源</h3>
+      <p>影片（無縫循環）、圖片、GIF、自己寫的 HTML/CSS/JS。拖進視窗就加入壁紙庫。</p></div>
+    <div class="card"><div class="ico">⚡️</div><h3>HTML 熱重載</h3>
+      <p>存檔就即時更新，不用重開 App。改一行顏色、改一段 canvas，桌面立刻跟著變。</p></div>
+    <div class="card"><div class="ico">🖼</div><h3>會動的壁紙庫</h3>
+      <p>上方大張即時預覽（影片真的在播、HTML 真的在跑），每 6 秒自動換下一張。</p></div>
+    <div class="card"><div class="ico">🧭</div><h3>第一次開就有導覽</h3>
+      <p>五步帶你看完「加入壁紙 → 選一張 → 調設定 → 套用」，不用自己摸。</p></div>
+    <div class="card"><div class="ico">🪄</div><h3>視差（景深）</h3>
+      <p>滑鼠移動時壁紙跟著位移幾像素，像隔著一層玻璃看桌面。預設關閉，可調 0–30px。</p></div>
+    <div class="card"><div class="ico">🔁</div><h3>定時輪換</h3>
+      <p>每 5 分鐘到 3 小時自動換一張，把整個壁紙庫當播放清單跑。</p></div>
+    <div class="card"><div class="ico">🔋</div><h3>全螢幕自動暫停</h3>
+      <p>看片、玩遊戲開全螢幕時壁紙自動停住；螢幕休眠、鎖定也會停，醒來自己接回去。</p></div>
+    <div class="card"><div class="ico">🌌</div><h3>內建精選 9 張</h3>
+      <p>NASA 公有領域的星雲、地球、極光、火星、喜馬拉雅……附出處，隨便用。</p></div>
+    <div class="card"><div class="ico">📦</div><h3>打包成獨立 App</h3>
+      <p>把一支影片包成雙擊即用的 <code>.app</code>，再做成拖曳安裝的 <code>.dmg</code> 送人。</p></div>
+  </div>
+
+  <h2 id="shots">畫面</h2>
+  <p class="lead">全部是真實截圖，不是概念圖。</p>
+  <div class="two">
+    <figure class="shot" style="margin:0">
+      <img src="preview/home.jpg" alt="壁紙庫首頁">
+      <figcaption>首頁：大張 hero 即時預覽 + 最新／精選／我的三列</figcaption>
+    </figure>
+    <figure class="shot" style="margin:0">
+      <img src="preview/settings.jpg" alt="設定視窗">
+      <figcaption>設定：一般／播放／自動化／關於，開關都有一行說明</figcaption>
+    </figure>
+  </div>
+
+  <h2 id="install">安裝</h2>
+  <div class="two">
+    <ol class="steps">
+      <li><b>下載 <code>.dmg</code></b>，打開後把「動態壁紙」拖進「應用程式」。</li>
+      <li><b>第一次開啟</b>：如果 macOS 說「無法驗證開發者」，到 <code>系統設定 → 隱私權與安全性</code> 按「仍要打開」。</li>
+      <li><b>把影片拖進視窗</b>（或直接用內建的 9 張精選），選一張按「套用到桌面」。</li>
+      <li><b>找選單列圖示</b>：這台 Mac 的選單列是自動隱藏的 —— 滑鼠移到螢幕最上面，圖示才會出現。</li>
+    </ol>
+    <div>
+      <div class="note">
+        <b>為什麼影片要「加入壁紙」而不能直接拖桌面上的檔案？</b><br>
+        不是沙盒 App 從 Finder 啟動時沒有「桌面／文件／下載」的讀取權限。把檔案交給 App 自己保管，
+        之後重開機、換路徑都不會壞。
+      </div>
+      <div class="note" style="margin-top:12px">
+        <b>只用一支壁紙 App。</b><br>
+        同時跑兩個壁紙程式會互相蓋掉圖層，看起來像「一下有、一下沒有」。
+      </div>
+    </div>
+  </div>
+
+  <h2>它跟別人有什麼不一樣</h2>
+  <table>
+    <tr><th></th><th>DynWall</th><th>一般的動態壁紙 App</th></tr>
+    <tr><td>自訂 HTML 壁紙</td><td>✅ 存檔即時熱重載</td><td>❌ 或要另外裝引擎</td></tr>
+    <tr><td>打包成獨立 App</td><td>✅ 影片 + 設定一起包</td><td>❌</td></tr>
+    <tr><td>原始碼</td><td>✅ 開源（非商業）</td><td>❌ 多為閉源付費</td></tr>
+    <tr><td>系統支援</td><td>macOS 13+ / Intel &amp; Apple Silicon</td><td>常見只支援最新版</td></tr>
+  </table>
+
+  <h2 id="license">授權與致謝</h2>
+  <p class="lead">
+    程式碼以 <b>PolyForm Noncommercial 1.0.0 + Share-Alike</b> 釋出：可以自由使用、修改、分享，
+    <b>但不能拿去賣</b>，改過的版本也必須用同樣的條款開源，並保留原作者署名。
+  </p>
+  <div class="note">
+    內建的 9 張精選壁紙來自 <b>NASA Image and Video Library</b>，依 NASA Media Usage Guidelines 屬<b>公有領域</b>；
+    逐張出處見 <code>resources/wallpapers/static/CREDITS.md</code>。NASA 不因此背書本專案。
+  </div>
+
+  <footer>
+    動態壁紙 · DynWall — Swift + AppKit + AVFoundation + WebKit，沒有第三方依賴。<br>
+    <a href="https://github.com/" id="repo-link-2">GitHub</a> ·
+    <a href="使用說明.md">完整使用說明</a> ·
+    個人專案，可能還有 BUG；有問題請附上 macOS 版本與 <code>~/Library/Logs/動態壁紙.log</code> 開 Issue。
+  </footer>
+</div>
+<script>
+  // 把三個 GitHub 連結換成同一個 repo（部署時改這一行就好）
+  const REPO = "https://github.com/YOUR-NAME/dynwall";
+  for (const id of ["repo-link", "repo-link-2", "src-btn", "dl-btn"]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.href = id === "dl-btn" ? REPO + "/releases/latest" : REPO;
+  }
+</script>
+</body>
+</html>

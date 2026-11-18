@@ -10,6 +10,15 @@ ok()   { echo "  ✅ $1"; PASS=$((PASS+1)); }
 bad()  { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
 
 cp "$CFG" /tmp/cfg-regress-bak.json
+# 海報測試需要 poster=true，輪換會干擾測試：測試期間強制打開，C 段會還原使用者的設定
+python3 - "$CFG" <<'EOF'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["poster"] = True
+d["rotationOn"] = False
+json.dump(d, open(p, "w"), indent=2, ensure_ascii=False)
+EOF
 pkill -f 'MacOS/DynWall' 2>/dev/null; sleep 2
 : > "$LOG"
 

@@ -780,12 +780,29 @@ final class ScreenWallpaper {
         }
     }
 
+    /// Wallpaper Engine 的網頁壁紙會呼叫這些 API；沒有就先補一個空的，避免整片黑
+    static let weShimJS = """
+    (function(){
+      if (!window.wallpaperPropertyListener) {
+        window.wallpaperPropertyListener = {
+          applyUserProperties: function(){}, applyGeneralProperties: function(){},
+          setPaused: function(){}, userDirectory: ""
+        };
+      }
+      if (!window.wallpaperRegisterAudioListener) { window.wallpaperRegisterAudioListener = function(){}; }
+      if (!window.wallpaperRegisterMediaStatusListener) { window.wallpaperRegisterMediaStatusListener = function(){}; }
+    })();
+    """
+
     func setupWeb(_ url: URL, watch: Bool) {
         let conf = WKWebViewConfiguration()
         conf.mediaTypesRequiringUserActionForPlayback = []
         conf.suppressesIncrementalRendering = false
         conf.userContentController.addUserScript(WKUserScript(source: Self.frameCounterJS,
                                                              injectionTime: .atDocumentEnd,
+                                                             forMainFrameOnly: false))
+        conf.userContentController.addUserScript(WKUserScript(source: Self.weShimJS,
+                                                             injectionTime: .atDocumentStart,
                                                              forMainFrameOnly: false))
         // 關閉「視窗被遮住就停止渲染」的節流（私有偏好；失敗不影響運作）
         let ok = DynSetPreferenceSafe(conf.preferences, "pageVisibilityBasedProcessSuppressionEnabled", NSNumber(value: false))
@@ -1007,6 +1024,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         if CommandLine.arguments.contains("--gui-test") {
             runGUITest()
+        }
+        if let i = CommandLine.arguments.firstIndex(of: "--import-we"), i + 1 < CommandLine.arguments.count {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                let p = CommandLine.arguments[i + 1]
+                let ok = self.importWEProject(at: URL(fileURLWithPath: p))
+                say("WE-IMPORT result=\(ok)")
+                self.libraryModel.refresh()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { NSApp.terminate(nil) }
+            }
         }
         if CommandLine.arguments.contains("--list-library") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -1305,6 +1331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(action("選擇影片檔…（mp4 / mov）", #selector(pickVideo)))
         menu.addItem(action("選擇 HTML 網頁檔…", #selector(pickHTML)))
         menu.addItem(action("選擇圖片 / GIF…", #selector(pickImage)))
+        menu.addItem(action("匯入 Wallpaper Engine 網頁壁紙…", #selector(importWEAction)))
 
         let builtinItem = NSMenuItem(title: "內建動態壁紙", action: nil, keyEquivalent: "")
         let bm = NSMenu()
@@ -1541,6 +1568,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc func openCustomFolder() {
         ensureDirs()
         NSWorkspace.shared.open(CUSTOM_DIR)
+    }
+
+    // MARK: Wallpaper Engine 網頁壁紙匯入
+
+    @objc func importWEAction() {
+        let panel = NSOpenPanel()
+        panel.title = "選擇 Wallpaper Engine 專案（project.json 或整個資料夾）"
+        panel.message = "會把整個專案複製進壁紙庫，之後不依賴原本的位置"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.allowedFileTypes = ["json"]
+        panel.begin { [weak self] resp in
+            guard let self, resp == .OK else { return }
+            var ok = 0
+            for u in panel.urls where self.importWEProject(at: u) { ok += 1 }
+            self.libraryModel.refresh()
+            let a = NSAlert()
+            a.messageText = ok > 0 ? "已匯入 \(ok) 個網頁壁紙" : "匯入失敗"
+            a.informativeText = ok > 0
+                ? "已放進壁紙庫，選一張按「套用到桌面」即可。\n註：Wallpaper Engine 的「屬性」面板與音訊視覺化不支援，會用預設值跑。"
+                : "找不到 project.json，或複製時出錯。詳見 ~/Library/Logs/動態壁紙.log。"
+            a.runModal()
+        }
+    }
+
+    /// 把一個 Wallpaper Engine 專案（type=web）複製進壁紙庫
+    @discardableResult
+    func importWEProject(at url: URL) -> Bool {
+        var dir = url
+        var isDir: ObjCBool = false
+        if !(fm.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue) {
+            dir = url.deletingLastPathComponent()
+        }
+        let pj = dir.appendingPathComponent("project.json")
+        guard let data = try? Data(contentsOf: pj),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            say("WE-IMPORT 失敗：\(dir.lastPathComponent) 沒有可讀的 project.json")
+            return false
+        }
+        let type = (obj["type"] as? String) ?? "?"
+        guard type == "web" else {
+            say("WE-IMPORT 失敗：type=\(type)（只支援網頁型 web）")
+            return false
+        }
+        let rawTitle = (obj["title"] as? String) ?? ""
+        let title = rawTitle.isEmpty ? dir.lastPathComponent : rawTitle
+        let entry = (obj["file"] as? String) ?? "index.html"
+        let safe = title.replacingOccurrences(of: "/", with: "-")
+                         .replacingOccurrences(of: ":", with: "-")
+                         .trimmingCharacters(in: .whitespacesAndNewlines)
+        let dest = LIBRARY_DIR.appendingPathComponent(safe)
+        try? fm.removeItem(at: dest)
+        do { try fm.copyItem(at: dir, to: dest) }
+        catch { say("WE-IMPORT 複製失敗：\(error)"); return false }
+        let idx = dest.appendingPathComponent("index.html")
+        if entry != "index.html", !fm.fileExists(atPath: idx.path) {
+            let html = """
+            <!DOCTYPE html><meta charset="utf-8">
+            <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{border:0;width:100%;height:100%}</style>
+            <iframe src="\(entry)" allow="autoplay"></iframe>
+            """
+            try? html.write(to: idx, atomically: true, encoding: .utf8)
+        }
+        say("WE-IMPORT ok title=\(title) entry=\(entry) dir=\(dest.lastPathComponent)")
+        return true
     }
 
     @objc func rescan() {
