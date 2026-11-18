@@ -101,6 +101,23 @@ struct SettingsView: View {
                            in: 0...0.7, step: 0.1)
                 }
             } header: { Text("調整") }
+
+            Section {
+                Toggle("滑鼠移動時，壁紙跟著往同方向微微位移（視差）", isOn: Binding(
+                    get: { cfg.parallaxOn },
+                    set: { cfg.parallaxOn = $0; Engine.shared.setParallax($0, cfg.parallax); reload() }))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("位移幅度：\(Int(cfg.parallax)) px")
+                        .font(.system(size: 12))
+                    Slider(value: Binding(
+                        get: { cfg.parallax },
+                        set: { cfg.parallax = $0; Engine.shared.setParallax(cfg.parallaxOn, $0); reload() }),
+                           in: 0...30, step: 1)
+                }
+                .disabled(!cfg.parallaxOn)
+                Text("壁紙會先放大一點，所以位移時不會露出黑邊；影片、圖片、HTML 都適用。")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+            } header: { Text("視差（景深）") }
         }
         .formStyle(.grouped)
     }

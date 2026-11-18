@@ -260,6 +260,7 @@ final class Engine {
     func setPaused(_ v: Bool) { app?.guiSetPaused(v) }
     func setAutoStart(_ v: Bool) { app?.guiSetAutoStart(v) }
     func setPoster(_ v: Bool) { app?.guiSetPoster(v) }
+    func setParallax(_ on: Bool, _ amount: Double) { app?.guiSetParallax(on, amount) }
 }
 
 // MARK: ───────────────────────── 資料模型

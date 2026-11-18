@@ -81,11 +81,13 @@ struct Config: Codable {
     var paused = false
     var autoStart = false
     var poster = true         // 套用壁紙時，同步把「靜態海報圖」設成系統桌布（關掉 App 後桌面仍是同一張）
+    var parallaxOn = true     // 視差：滑鼠移動時，壁紙微微跟著往同方向位移
+    var parallax = 10.0       // 位移幅度（像素）；壁紙會先放大一點避免露邊
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case kind, ref, mute, rate, gravity, dim, interactive, paused, autoStart, poster
+        case kind, ref, mute, rate, gravity, dim, interactive, paused, autoStart, poster, parallaxOn, parallax
     }
 
     init(from decoder: Decoder) throws {
@@ -100,6 +102,8 @@ struct Config: Codable {
         paused = (try? c.decode(Bool.self, forKey: .paused)) ?? false
         autoStart = (try? c.decode(Bool.self, forKey: .autoStart)) ?? false
         poster = (try? c.decode(Bool.self, forKey: .poster)) ?? true
+        parallaxOn = (try? c.decode(Bool.self, forKey: .parallaxOn)) ?? true
+        parallax = (try? c.decode(Double.self, forKey: .parallax)) ?? 10.0
     }
 }
 
@@ -463,6 +467,25 @@ final class ScreenWallpaper {
         let w = DispatchWorkItem { [weak self] in self?.writeDesktopPoster() }
         posterWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: w)
+    }
+
+    /// 視差：滑鼠離開中心多少，整張壁紙就往同方向位移幾像素。
+    /// 內容會先放大一點（比螢幕大 2 倍幅度），所以位移時不會露邊。
+    func applyParallax(_ mouse: NSPoint?) {
+        guard let layer = root.layer else { return }
+        let amount = CGFloat(max(0, min(cfg.parallax, 40)))
+        guard cfg.parallaxOn, amount > 0.5, let m = mouse else {
+            if !CATransform3DIsIdentity(layer.transform) { layer.transform = CATransform3DIdentity }
+            return
+        }
+        let f = screen.frame
+        let nx = max(-1, min(1, (m.x - f.midX) / (f.width / 2)))
+        let ny = max(-1, min(1, (m.y - f.midY) / (f.height / 2)))
+        let pad = amount * 2 + 4
+        let scale = 1 + (pad * 2) / min(f.width, f.height)
+        var t = CATransform3DMakeScale(scale, scale, 1)
+        t = CATransform3DTranslate(t, nx * amount / scale, ny * amount / scale, 0)
+        layer.transform = t
     }
 
     /// 把某張圖設成這台螢幕的系統桌布
@@ -921,6 +944,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var cfg = Config()
     var screens: [ScreenWallpaper] = []
     var statusItem: NSStatusItem!
+    var parallaxTimer: Timer?
+    var lastParallaxLog = Date.distantPast
     var pausedBySystem = false
     var systemHidden = false
     var healthTimer: Timer?
@@ -1017,6 +1042,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.showLibraryWindow() }
         }
         say("READY screens=\(screens.count) kind=\(cfg.kind) ref=\(cfg.ref) level=\(screens.first?.window.level.rawValue ?? 0)")
+        startParallax()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -1033,6 +1059,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             }
             say("POSTER-ON-QUIT screens=\(screens.count) waited=\(needWait)")
         }
+        parallaxTimer?.invalidate()
+        parallaxTimer = nil
         for s in screens { s.teardownContent() }
         if let a = activity { ProcessInfo.processInfo.endActivity(a) }
     }
@@ -1831,6 +1859,43 @@ extension AppDelegate {
             NSApp.setActivationPolicy(.accessory)
             say("LIBRARY-CLOSE")
         }
+    }
+
+    // MARK: 視差
+
+    func startParallax() {
+        parallaxTimer?.invalidate()
+        parallaxTimer = nil
+        guard cfg.parallaxOn, cfg.parallax > 0.5 else {
+            for sw in screens { sw.applyParallax(nil) }
+            say("PARALLAX off")
+            return
+        }
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            let m = NSEvent.mouseLocation
+            for sw in self.screens { sw.applyParallax(m) }
+            if Date().timeIntervalSince(self.lastParallaxLog) > 3 {
+                self.lastParallaxLog = Date()
+                let f = self.screens.first?.screen.frame ?? .zero
+                let nx = f.width > 0 ? (m.x - f.midX) / (f.width / 2) : 0
+                let ny = f.height > 0 ? (m.y - f.midY) / (f.height / 2) : 0
+                let tr = self.screens.first?.root.layer?.transform ?? CATransform3DIdentity
+                say(String(format: "PARALLAX dx=%.1f dy=%.1f layer scale=%.3f tx=%.1f ty=%.1f",
+                           nx * self.cfg.parallax, ny * self.cfg.parallax, tr.m11, tr.m41, tr.m42))
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        parallaxTimer = t
+        say("PARALLAX on amount=\(cfg.parallax)")
+    }
+
+    func guiSetParallax(_ on: Bool, _ amount: Double) {
+        cfg.parallaxOn = on
+        cfg.parallax = amount
+        saveConfig(cfg)
+        for sw in screens { sw.cfg.parallaxOn = on; sw.cfg.parallax = amount }
+        startParallax()
     }
 
     // MARK: 設定視窗
