@@ -347,6 +347,7 @@ final class ScreenWallpaper {
     var looper: AVPlayerLooper?
     var lastReorderAt = Date.distantPast
     var idleTicks = 0
+    var lastPosterURL: URL?
     var playerLayer: AVPlayerLayer?
     var webView: WKWebView?
     var dimView: DimView?
@@ -464,8 +465,62 @@ final class ScreenWallpaper {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: w)
     }
 
+    /// 把某張圖設成這台螢幕的系統桌布
+    func applyDesktopPicture(_ url: URL) {
+        let opts: [NSWorkspace.DesktopImageOptionKey: Any] = [
+            .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
+            .allowClipping: true,
+        ]
+        do {
+            try NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: opts)
+            lastDesktopWriteAt = Date()
+            say("POSTER screen=\(displayID) \(posterLabel(cfg)) file=\(url.lastPathComponent)")
+        } catch {
+            dbg("設定系統桌布失敗：\(error)")
+        }
+    }
+
+    /// 結束 App 時用：立刻沿用最近一張海報（同步、瞬間完成），
+    /// 不再等非同步抽格 —— 以前等 6 秒還會來不及（POSTER-ON-QUIT left=1）。
+    @discardableResult
+    func posterOnQuit() -> Bool {
+        guard cfg.poster else { return true }
+        if let u = lastPosterURL, fm.fileExists(atPath: u.path) {
+            applyDesktopPicture(u)
+            say("POSTER-ON-QUIT reuse screen=\(displayID) file=\(u.lastPathComponent)")
+            return true
+        }
+        // 退而求其次：桌面上已經是同一張（我們產生的海報，或圖片壁紙原檔）→ 不用重做，直接結束
+        if let cur = NSWorkspace.shared.desktopImageURL(for: screen), fm.fileExists(atPath: cur.path) {
+            let isOurs = cur.lastPathComponent.hasPrefix("poster-")
+                || cfg.kind == "image" && cur.path == URL(fileURLWithPath: resolveRef(cfg.ref)).path
+            if isOurs {
+                say("POSTER-ON-QUIT reuse-current screen=\(displayID) file=\(cur.lastPathComponent)")
+                lastPosterURL = cur
+                return true
+            }
+        }
+        // 還沒有任何海報（例如剛套用就馬上結束）→ 退回非同步產生
+        writeDesktopPoster()
+        say("POSTER-ON-QUIT generate screen=\(displayID)")
+        return false
+    }
+
     /// 產生這台螢幕的靜態海報，並設成系統桌布
     func writeDesktopPoster(_ done: (() -> Void)? = nil) {
+        // 桌面上已經是這張壁紙的海報（比例也對）→ 連產生都不用，直接跳過
+        // 每次啟動都重畫一張 2.6MB 的 PNG 很浪費，也容易讓桌布閃一下
+        let preHash = shortHash(cfg.kind + "|" + cfg.ref)
+        if let cur = NSWorkspace.shared.desktopImageURL(for: screen), fm.fileExists(atPath: cur.path),
+           cur.lastPathComponent.hasPrefix("poster-\(preHash)-"),
+           let img = NSImage(contentsOf: cur), let rep = img.representations.first, rep.pixelsHigh > 0,
+           abs(Double(rep.pixelsWide) / Double(rep.pixelsHigh) - Double(screen.frame.width / max(screen.frame.height, 1))) < 0.01 {
+            lastPosterURL = cur
+            say("POSTER-SKIP screen=\(displayID) 已是同一張（不重新產生）")
+            prunePosters(keep: cur)
+            done?()
+            return
+        }
         let finish: (URL?) -> Void = { [weak self] url in
             guard let self = self else { done?(); return }
             if let url = url {
@@ -476,29 +531,22 @@ final class ScreenWallpaper {
                     let cur = curURL.lastPathComponent
                     if cur == url.lastPathComponent || cur.hasPrefix("poster-\(h)-") {
                         let screenAspect = Double(self.screen.frame.width / max(self.screen.frame.height, 1))
-                        var aspectOK = true
-                        if let img = NSImage(contentsOf: curURL), let rep = img.representations.first, rep.pixelsHigh > 0 {
+                        var aspectOK = fm.fileExists(atPath: curURL.path)   // 檔案被清掉就一定要重做
+                        if aspectOK, let img = NSImage(contentsOf: curURL), let rep = img.representations.first, rep.pixelsHigh > 0 {
                             aspectOK = abs(Double(rep.pixelsWide) / Double(rep.pixelsHigh) - screenAspect) < 0.01
                         }
                         if aspectOK {
                             say("POSTER-SKIP screen=\(self.displayID) 已是同一張")
+                            self.lastPosterURL = curURL
+                            self.prunePosters(keep: curURL)   // 跳過也要清，不然快取會一直長大
                             done?(); return
                         }
                         say("POSTER-REDO screen=\(self.displayID) 比例不符（舊海報未裁切）")
                     }
                 }
-                let opts: [NSWorkspace.DesktopImageOptionKey: Any] = [
-                    .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
-                    .allowClipping: true,
-                ]
-                do {
-                    try NSWorkspace.shared.setDesktopImageURL(url, for: self.screen, options: opts)
-                    lastDesktopWriteAt = Date()
-                    say("POSTER screen=\(self.displayID) \(posterLabel(self.cfg)) file=\(url.lastPathComponent)")
-                    self.prunePosters(keep: url)
-                } catch {
-                    dbg("設定系統桌布失敗：\(error)")
-                }
+                self.applyDesktopPicture(url)
+                self.lastPosterURL = url
+                self.prunePosters(keep: url)
             } else {
                 dbg("海報產生失敗 kind=\(self.cfg.kind) ref=\(self.cfg.ref)")
             }
@@ -658,7 +706,11 @@ final class ScreenWallpaper {
     func prunePosters(keep: URL) {
         let dir = CACHE_DIR.appendingPathComponent("posters", isDirectory: true)
         guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
-        let others = files.filter { $0.lastPathComponent != keep.lastPathComponent }.sorted { a, b in
+        // 正在當桌布的那張絕對不能刪，否則系統桌布會指向一個不存在的檔案
+        var protected = Set<String>([keep.lastPathComponent])
+        if let cur = NSWorkspace.shared.desktopImageURL(for: screen) { protected.insert(cur.lastPathComponent) }
+        if let lp = lastPosterURL { protected.insert(lp.lastPathComponent) }
+        let others = files.filter { !protected.contains($0.lastPathComponent) }.sorted { a, b in
             let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             return da > db
@@ -933,13 +985,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func applicationWillTerminate(_ notification: Notification) {
         // 關掉 App 前，先把「現在這一格」變成系統桌布 —— 否則桌面會變回原本的壁紙
         if cfg.poster && !screens.isEmpty {
-            let box = IntBox(screens.count)
-            for s in screens { s.writeDesktopPoster { box.value -= 1 } }
-            let deadline = Date().addingTimeInterval(6.0)
-            while box.value > 0 && Date() < deadline {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            // 有現成海報就同步沿用（瞬間完成）；沒有才退回非同步產生，最多等 2 秒
+            var needWait = false
+            for s in screens where !s.posterOnQuit() { needWait = true }
+            if needWait {
+                let deadline = Date().addingTimeInterval(2.0)
+                while Date() < deadline {
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+                }
             }
-            say("POSTER-ON-QUIT screens=\(screens.count) left=\(box.value)")
+            say("POSTER-ON-QUIT screens=\(screens.count) waited=\(needWait)")
         }
         for s in screens { s.teardownContent() }
         if let a = activity { ProcessInfo.processInfo.endActivity(a) }
