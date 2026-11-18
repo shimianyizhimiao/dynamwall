@@ -616,45 +616,60 @@ struct LibraryView: View {
 
     private var libraryPane: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Picker("", selection: $model.filter) {
-                    ForEach(model.filters, id: \.self) { Text($0) }
+            VStack(spacing: 8) {
+                // 第一列：類型切換（讓它用自然寬度，不要硬塞固定寬度被裁掉）
+                HStack(spacing: 10) {
+                    Picker("", selection: $model.filter) {
+                        ForEach(model.filters, id: \.self) { Text($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .tourAnchor("filters")
+
+                    Spacer()
+
+                    Text("顯示 \(model.filtered.count) / 共 \(model.items.count) 張")
+                        .font(.system(size: 10)).foregroundColor(.secondary)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 380)
 
-                TextField("搜尋…", text: $model.search)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 150)
+                // 第二列：搜尋、排序、動作
+                HStack(spacing: 10) {
+                    TextField("搜尋…", text: $model.search)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 120, maxWidth: 200)
 
-                Picker("", selection: $model.sort) {
-                    ForEach(model.sorts, id: \.self) { Text($0) }
+                    Picker("", selection: $model.sort) {
+                        ForEach(model.sorts, id: \.self) { Text($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize()
+
+                    Spacer()
+
+                    Button {
+                        model.pickFiles()
+                    } label: { Label("加入壁紙", systemImage: "plus") }
+                    .labelStyle(.titleAndIcon)
+                    .fixedSize()
+                    .tourAnchor("add")
+
+                    Button {
+                        model.refresh()
+                    } label: { Image(systemName: "arrow.clockwise") }
+                    .help("重新整理")
+
+                    Button {
+                        tour.replay()
+                    } label: { Image(systemName: "questionmark.circle") }
+                    .help("再看一次使用導覽")
+
+                    Button {
+                        NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
+                    } label: { Image(systemName: "gearshape") }
+                    .help("設定（⌘,）")
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .frame(width: 104)
-
-                Spacer()
-
-                Button {
-                    model.pickFiles()
-                } label: { Label("加入壁紙", systemImage: "plus") }
-                .tourAnchor("add")
-
-                Button {
-                    model.refresh()
-                } label: { Image(systemName: "arrow.clockwise") }
-
-                Button {
-                    tour.replay()
-                } label: { Image(systemName: "questionmark.circle") }
-                .help("再看一次使用導覽")
-
-                Button {
-                    NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
-                } label: { Image(systemName: "gearshape") }
-                .help("設定（⌘,）")
             }
             .padding(12)
 
@@ -685,8 +700,6 @@ struct LibraryView: View {
                     .font(.system(size: 11)).foregroundColor(.secondary)
                     .lineLimit(1)
                 Spacer()
-                Text("顯示 \(model.filtered.count) / 共 \(model.items.count) 張")
-                    .font(.system(size: 10)).foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14).padding(.vertical, 6)

@@ -1841,7 +1841,8 @@ extension AppDelegate {
         func tick() {
             guard i < t.steps.count else {
                 let s = size()
-                say("TOURTEST done steps=\(t.steps.count) active=\(t.active) window=\(Int(s.width))x\(Int(s.height))")
+                let all = t.rects.map { "\($0.key)=\(Int($0.value.minX)),\(Int($0.value.minY)),\(Int($0.value.width))x\(Int($0.value.height))" }.sorted().joined(separator: " ")
+                say("TOURTEST done steps=\(t.steps.count) active=\(t.active) window=\(Int(s.width))x\(Int(s.height)) rects=[\(all)]")
                 return
             }
             say("TOURTEST step=\(i + 1) \(t.anchorReport(size())) active=\(t.active)")
