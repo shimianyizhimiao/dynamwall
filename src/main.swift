@@ -1635,7 +1635,7 @@ extension AppDelegate {
                     delay += 4
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 Engine.shared.setDim(0.3)
                 Engine.shared.setRate(1.5)
                 Engine.shared.setGravity("fit")
