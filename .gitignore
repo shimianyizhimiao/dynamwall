@@ -13,7 +13,7 @@ resources/thumbs/*.jpg
 resources/posters/*.jpg
 
 # 個人筆記 / 截圖 / 執行紀錄
-README.private.md
+*.private.md
 預覽圖/
 *.log
 logs/
