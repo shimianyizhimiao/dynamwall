@@ -24,21 +24,21 @@ final class TourState: ObservableObject {
     @Published var rects: [String: CGRect] = [:]
 
     let steps: [TourStep] = [
+        TourStep(anchor: "inspector",
+                 title: "這一張大圖就是你的壁紙",
+                 body: "它會真的播放（影片會動、HTML 會跑），每 6 秒自己換一張；滑鼠停在上面會暫停自動換，兩邊箭頭和下面圓點也可以手動切換。"),
         TourStep(anchor: "grid",
-                 title: "這裡是你的壁紙庫",
-                 body: "所有壁紙都在這一格一格的縮圖裡：內建的、你自己加的影片、圖片、GIF、HTML 都在一起。上面可以切換類型、搜尋名稱，按 ↻ 重新整理。滑鼠移上去就能看動態預覽。"),
+                 title: "下面是你的壁紙庫",
+                 body: "最新壁紙／精選動態／我的壁紙三列，可以左右滑。點一張，上面的大圖就跳過去；滑過去看「設為桌布」直接換。"),
         TourStep(anchor: "add",
                  title: "加入你自己的壁紙",
-                 body: "按「加入壁紙」選檔案，或直接把檔案拖進這個視窗。支援 MP4 / MOV、PNG / JPG / HEIC、GIF，以及整個 HTML 資料夾。放進來的檔案會複製一份到 App 自己的資料夾，所以之後把原檔刪掉也不會壞。"),
-        TourStep(anchor: "inspector",
-                 title: "上面這張大圖就是精選",
-                 body: "它會每 6 秒自己換一張（滑鼠停在上面就會暫停自動換），兩邊的箭頭和下面的圓點都可以手動切換。想換什麼壁紙，看它一眼就知道長什麼樣。"),
+                 body: "按「加入壁紙」選檔案，或直接把檔案拖進視窗。支援 MP4 / MOV、PNG / JPG / HEIC、GIF，以及整個 HTML 資料夾；檔案會複製一份到 App 自己資料夾，原檔刪掉也不會壞。"),
         TourStep(anchor: "apply",
                  title: "按「套用到桌面」就換掉",
-                 body: "大圖下面這顆按鈕可以直接換壁紙；下面的橫向卡片列（最新／精選動態／我的壁紙）點一張，大圖就會跳到它。速度、暗化、填滿這些在全域設定裡（齒輪）。"),
+                 body: "大圖下面這顆按鈕直接換壁紙。速度、暗化、填滿、視差、定時輪換都在右上角齒輪（⌘,）裡。"),
         TourStep(anchor: nil,
                  title: "平常從選單列回來",
-                 body: "App 平时躲在選單列（🖼 圖示）。這台 Mac 的選單列是自動隱藏的 —— 把滑鼠移到螢幕最上面，圖示才會出現，點它就能開壁紙庫（⌘L）、暫停或退出。看完按「開始使用」就可以關掉這個導覽。")
+                 body: "App 平時躲在選單列（🖼 圖示）。這台 Mac 的選單列是自動隱藏的 —— 把滑鼠移到螢幕最上面，圖示才會出現，點它就能開壁紙庫（⌘L）、暫停或退出。看完按「開始使用」就關掉導覽。")
     ]
 
     var current: TourStep { steps[min(step, steps.count - 1)] }
@@ -83,8 +83,9 @@ final class TourState: ObservableObject {
     /// 給自動測試用：目前這一步的錨點有沒有抓到、在不在視窗內
     func anchorReport(_ windowSize: CGSize) -> String {
         guard let a = current.anchor else { return "anchor=center" }
-        guard let r = rects[a] else { return "anchor=\(a) rect=nil" }
-        let inside = r.minX >= -1 && r.minY >= -1 && r.maxX <= windowSize.width + 1 && r.maxY <= windowSize.height + 1
+        guard let raw = rects[a] else { return "anchor=\(a) rect=nil" }
+        let r = raw.intersection(CGRect(origin: .zero, size: windowSize))
+        let inside = !r.isNull && r.width > 8 && r.height > 24
         return "anchor=\(a) rect=\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width))x\(Int(r.height)) inside=\(inside)"
     }
 }
@@ -116,7 +117,12 @@ struct TourOverlay: View {
     var body: some View {
         GeometryReader { geo in
             let step = tour.current
-            let r = step.anchor.flatMap { tour.rects[$0] }
+            let bounds = CGRect(origin: .zero, size: geo.size)
+            let r: CGRect? = {
+                guard let raw = step.anchor.flatMap({ tour.rects[$0] }) else { return nil }
+                let cut = raw.intersection(bounds)
+                return (cut.isNull || cut.height < 24) ? nil : cut
+            }()
             ZStack(alignment: .topLeading) {
                 // 半透明遮罩，錨點處挖一個洞
                 Color.black.opacity(0.62)
