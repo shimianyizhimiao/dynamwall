@@ -1,6 +1,31 @@
 import SwiftUI
 import AppKit
 
+/// 自己畫的開關：系統的 NSSwitch 在這個視窗偶爾會把白色圓點畫丟，改用純 SwiftUI 繪製
+struct PillSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            configuration.label
+            Spacer(minLength: 8)
+            Capsule()
+                .fill(configuration.isOn ? Color.accentColor : Color.primary.opacity(0.22))
+                .frame(width: 42, height: 24)
+                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 20, height: 20)
+                        .padding(2)
+                        .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
+                }
+                .overlay(Capsule().stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+                .contentShape(Capsule())
+                .onTapGesture {
+                    withAnimation(.easeOut(duration: 0.14)) { configuration.isOn.toggle() }
+                }
+        }
+    }
+}
+
 // MARK: ───────────────────────── 設定視窗（分頁）
 //
 // 照 WaifuX 的做法：設定不要塞在側邊面板，開一個獨立視窗、分成幾頁。
@@ -23,6 +48,7 @@ struct SettingsView: View {
             about.tabItem { Label("關於", systemImage: "info.circle") }
         }
         .frame(width: 620, height: 470)
+        .background(Color(nsColor: .windowBackgroundColor))
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Spacer()
@@ -48,8 +74,7 @@ struct SettingsView: View {
             Spacer(minLength: 8)
             Toggle("", isOn: isOn)
                 .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
+                .toggleStyle(PillSwitchStyle())
                 .fixedSize()
         }
     }
