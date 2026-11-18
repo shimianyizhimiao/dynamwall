@@ -35,6 +35,25 @@ struct SettingsView: View {
         .onAppear { reload(); cacheMB = Self.cacheSizeMB() }
     }
 
+    /// 每個開關都給標題＋一行說明，避免只看到兩顆「不知道是什麼」的膠囊
+    private func toggleRow(_ title: String, _ desc: String, _ isOn: Binding<Bool>) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 12, weight: .medium))
+                Text(desc)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .fixedSize()
+        }
+    }
+
     private func reload() { cfg = Engine.shared.config }
 
     /// sheet 或獨立視窗都能關：有 sheet 父視窗就 endSheet，否則直接關
@@ -52,8 +71,10 @@ struct SettingsView: View {
     private var general: some View {
         Form {
             Section {
-                Toggle("登入時自動啟動（只在背景跑壁紙）", isOn: bind(\.autoStart, { Engine.shared.setAutoStart($0) }))
-                Toggle("關掉 App 後，桌面保留當下畫面（靜態海報）", isOn: bind(\.poster, { Engine.shared.setPoster($0) }))
+                toggleRow("登入時自動啟動", "開機後在背景直接開始播壁紙，不開視窗。",
+                          bind(\.autoStart, { Engine.shared.setAutoStart($0) }))
+                toggleRow("關掉 App 後保留桌面", "結束 App 時把當下畫面存成靜態圖設為桌布，桌面不會變回原本的壁紙。",
+                          bind(\.poster, { Engine.shared.setPoster($0) }))
             } header: { Text("啟動") }
 
             Section {
@@ -80,11 +101,12 @@ struct SettingsView: View {
     private var playback: some View {
         Form {
             Section {
-                Toggle("播放中（取消＝暫停）", isOn: Binding(
-                    get: { !cfg.paused },
-                    set: { Engine.shared.setPaused(!$0); reload() }))
-                Toggle("靜音", isOn: bind(\.mute, { Engine.shared.setMute($0) }))
-                Toggle("允許滑鼠互動（自訂網頁壁紙）", isOn: bind(\.interactive, { Engine.shared.setInteractive($0) }))
+                toggleRow("播放中", "關掉就暫停壁紙（影片停在當下這一格）。",
+                          Binding(get: { !cfg.paused }, set: { Engine.shared.setPaused(!$0); reload() }))
+                toggleRow("靜音", "影片壁紙的聲音；預設靜音。",
+                          bind(\.mute, { Engine.shared.setMute($0) }))
+                toggleRow("允許滑鼠互動", "只有自訂 HTML 壁紙有作用：滑鼠點擊、滾動會傳給網頁。",
+                          bind(\.interactive, { Engine.shared.setInteractive($0) }))
             } header: { Text("播放") }
 
             Section {
@@ -103,9 +125,9 @@ struct SettingsView: View {
             } header: { Text("調整") }
 
             Section {
-                Toggle("滑鼠移動時，壁紙跟著往同方向微微位移（視差）", isOn: Binding(
-                    get: { cfg.parallaxOn },
-                    set: { cfg.parallaxOn = $0; Engine.shared.setParallax($0, cfg.parallax); reload() }))
+                toggleRow("視差（景深）", "滑鼠移動時，壁紙往同方向微微位移，看起來有前後層次。預設關閉。",
+                          Binding(get: { cfg.parallaxOn },
+                                  set: { cfg.parallaxOn = $0; Engine.shared.setParallax($0, cfg.parallax); reload() }))
                 VStack(alignment: .leading, spacing: 6) {
                     Text("位移幅度：\(Int(cfg.parallax)) px")
                         .font(.system(size: 12))
