@@ -695,7 +695,7 @@ final class ScreenWallpaper {
 
     func reloadWeb() {
         guard let wv = webView, let u = currentHTML else { return }
-        dbg("熱重載 \(u.lastPathComponent)")
+        say("RELOAD 熱重載 \(u.lastPathComponent)")
         wv.loadFileURL(u, allowingReadAccessTo: u.deletingLastPathComponent())
     }
 
