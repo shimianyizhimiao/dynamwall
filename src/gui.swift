@@ -446,18 +446,38 @@ final class PreviewBox: NSView {
             p.isMuted = true
             p.preventsDisplaySleepDuringVideoPlayback = false
             let l = AVPlayerLayer(player: p)
-            l.videoGravity = .resizeAspect
+            l.videoGravity = .resizeAspectFill
             l.frame = bounds
             l.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
             layer?.addSublayer(l)
             player = p
             p.play()
+            say("PREVIEW video start=\(URL(fileURLWithPath: resolveRef(item.ref)).lastPathComponent)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak p] in
+                let t = p?.currentTime().seconds ?? 0
+                say("PREVIEW video t=\(String(format: "%.2f", t)) rate=\(p?.rate ?? 0)")
+            }
         case "image":
-            let iv = NSImageView(frame: bounds)
-            iv.imageScaling = .scaleProportionallyUpOrDown
-            iv.image = NSImage(contentsOfFile: resolveRef(item.ref))
-            iv.autoresizingMask = [.width, .height]
-            addSubview(iv)
+            let path = resolveRef(item.ref)
+            if path.lowercased().hasSuffix(".gif") {
+                // GIF 用 WebView 才會真的動（NSImageView 不會播動畫）
+                let wv = WKWebView(frame: bounds, configuration: WKWebViewConfiguration())
+                wv.autoresizingMask = [.width, .height]
+                let html = """
+                <html><body style="margin:0;background:#000;overflow:hidden">
+                <img src="\(URL(fileURLWithPath: path).lastPathComponent)" style="width:100%;height:100%;object-fit:cover;display:block">
+                </body></html>
+                """
+                let dir = URL(fileURLWithPath: path).deletingLastPathComponent()
+                wv.loadHTMLString(html, baseURL: dir)
+                addSubview(wv)
+            } else {
+                let iv = NSImageView(frame: bounds)
+                iv.imageScaling = .scaleAxesIndependently
+                iv.image = NSImage(contentsOfFile: path)
+                iv.autoresizingMask = [.width, .height]
+                addSubview(iv)
+            }
         default:
             let url = item.kind == "builtin" ? builtinURL(item.ref) : URL(fileURLWithPath: resolveRef(item.ref))
             guard let url = url else { return }
@@ -467,6 +487,7 @@ final class PreviewBox: NSView {
             if #available(macOS 12.0, *) { wv.underPageBackgroundColor = .black }
             addSubview(wv)
             wv.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+            say("PREVIEW web load=\(url.lastPathComponent)")
         }
     }
 
@@ -746,17 +767,16 @@ struct LibraryView: View {
     private var hero: some View {
         GeometryReader { geo in
             ZStack(alignment: .bottomLeading) {
-                Group {
-                    if let t = heroItem?.thumb {
-                        Image(nsImage: t).resizable().aspectRatio(contentMode: .fill)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .clipped()
-                    } else {
-                        LinearGradient(colors: [Color(red: 0.07, green: 0.09, blue: 0.18),
-                                                Color(red: 0.28, green: 0.12, blue: 0.36)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing)
-                    }
+                ZStack {
+                    LinearGradient(colors: [Color(red: 0.07, green: 0.09, blue: 0.18),
+                                            Color(red: 0.28, green: 0.12, blue: 0.36)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                    LivePreview(item: heroItem)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                        .allowsHitTesting(false)
                 }
+                .frame(width: geo.size.width, height: geo.size.height)
 
                 // 左下的暗角，文字才看得清楚（跟他一樣由下往上漸層）
                 LinearGradient(colors: [.black.opacity(0.9), .black.opacity(0.35), .clear],
