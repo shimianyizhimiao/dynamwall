@@ -928,6 +928,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var lastPosterRefreshAt = Date.distantPast
     var activity: NSObjectProtocol?
     var libraryWindow: NSWindow?
+    var settingsWindow: NSWindow?
     let libraryModel = LibraryModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -973,6 +974,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         if CommandLine.arguments.contains("--gui-test") {
             runGUITest()
+        }
+        if CommandLine.arguments.contains("--tour-test") {
+            runTourTest()
+        }
+        if CommandLine.arguments.contains("--settings-test") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                self.showSettingsWindow()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    if let w = self.settingsWindow {
+                        say("SETTINGSTEST frame=\(Int(w.frame.width))x\(Int(w.frame.height)) visible=\(w.isVisible) title=\(w.title)")
+                    } else {
+                        say("SETTINGSTEST nil")
+                    }
+                }
+            }
         }
         if !UserDefaults.standard.bool(forKey: "welcomed") { UserDefaults.standard.set(true, forKey: "welcomed") }
         // 圖形化介面：一般開啟就直接顯示壁紙庫；登入時自動啟動（--login）只在背景跑壁紙
@@ -1203,6 +1219,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let libItem = action("開啟壁紙庫…", #selector(showLibraryAction))
         libItem.keyEquivalent = "l"
         menu.addItem(libItem)
+        let tourItem = action("顯示使用導覽…", #selector(showTourAction))
+        menu.addItem(tourItem)
+        let setItem = action("設定…", #selector(showSettingsAction))
+        setItem.keyEquivalent = ","
+        menu.addItem(setItem)
         menu.addItem(.separator())
         menu.addItem(info("目前：\(currentLabel())"))
         menu.addItem(info("螢幕：\(screens.count)　狀態：\(cfg.paused || pausedBySystem ? "暫停" : "播放中")"))
@@ -1737,7 +1758,7 @@ extension AppDelegate {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 // 記住使用者原本的設定，測完要還原（不然會被留在暗化 0.3／速度 1.5／留黑邊）
-                let oldDim = cfg.dim, oldRate = cfg.rate, oldGravity = cfg.gravity
+                let oldDim = self.cfg.dim, oldRate = self.cfg.rate, oldGravity = self.cfg.gravity
                 Engine.shared.setDim(0.3)
                 Engine.shared.setRate(1.5)
                 Engine.shared.setGravity("fit")
@@ -1783,7 +1804,58 @@ extension AppDelegate {
         }
     }
 
+    // MARK: 設定視窗
+
+    @objc func showSettingsWindow() {
+        if settingsWindow == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 440),
+                             styleMask: [.titled, .closable],
+                             backing: .buffered, defer: false)
+            w.title = "動態壁紙 設定"
+            w.isReleasedWhenClosed = false
+            w.contentView = NSHostingView(rootView: SettingsView())
+            w.center()
+            settingsWindow = w
+            say("SETTINGS-OPEN")
+        }
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc func showSettingsAction() { showSettingsWindow() }
+
     @objc func showLibraryAction() { showLibraryWindow() }
+
+    /// 選單列「顯示使用導覽…」：開壁紙庫並重播導覽
+    @objc func showTourAction() {
+        showLibraryWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { TourState.shared.replay() }
+    }
+
+    /// 自動測試：逐步走完導覽，並回報每個錨點有沒有抓到、在不在視窗內
+    func runTourTest() {
+        let t = TourState.shared
+        var i = 0
+        func size() -> CGSize { libraryWindow?.contentView?.bounds.size ?? .zero }
+        func tick() {
+            guard i < t.steps.count else {
+                let s = size()
+                say("TOURTEST done steps=\(t.steps.count) active=\(t.active) window=\(Int(s.width))x\(Int(s.height))")
+                return
+            }
+            say("TOURTEST step=\(i + 1) \(t.anchorReport(size())) active=\(t.active)")
+            t.next()
+            i += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { tick() }
+        }
+        say("TOURTEST start")
+        showLibraryWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            t.replay()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { tick() }
+        }
+    }
 }
 
 // MARK: ───────────────────────── 壁紙項目 / 掃描 / 縮圖 / 引擎橋樑（實作在 gui.swift）

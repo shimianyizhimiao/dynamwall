@@ -62,7 +62,7 @@ echo "==> 編譯 Swift 主程式 + 圖形介面"
 swiftc -swift-version 5 -O \
   -import-objc-header "$SRC/bridge.h" \
   -o "$BUILD/$APP/Contents/MacOS/$BIN" \
-  "$SRC/main.swift" "$SRC/gui.swift" "$BUILD/bridge.o" \
+  "$SRC/main.swift" "$SRC/gui.swift" "$SRC/tour.swift" "$SRC/settings.swift" "$BUILD/bridge.o" \
   -framework Cocoa -framework AVFoundation -framework WebKit -framework SwiftUI \
   -framework UniformTypeIdentifiers
 
