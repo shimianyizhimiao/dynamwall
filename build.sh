@@ -1,5 +1,5 @@
 #!/bin/bash
-# 編譯「動態壁紙」App
+# 編譯「動態壁紙 / DynWall」
 #   用法： ./build.sh          → 編譯到 build/動態壁紙.app
 #          ./build.sh install  → 編譯後安裝到 ~/Applications
 set -euo pipefail
@@ -12,6 +12,29 @@ APP="動態壁紙.app"
 BIN="DynWall"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
+# 用 Chrome 無頭截圖。無限動畫的頁面 Chrome 不會自己退出，所以：
+#   1) 每次用獨立的 profile（避免 SingletonLock 卡住）
+#   2) URL 先做百分比編碼（中文/空白路徑否則載不到）
+#   3) 背景啟動，輪詢輸出檔出現就算完成，最多等 8 秒後直接砍掉
+shot() {  # shot <輸出 png> <寬> <高> <virtual-time ms> <html 路徑>
+  local out="$1" w="$2" h="$3" budget="$4" html="$5"
+  rm -f "$out"
+  local profile url pid waited=0
+  profile="$(mktemp -d /tmp/dynwall-chrome-XXXXXX)"
+  url="$(python3 -c 'import sys,pathlib;print(pathlib.Path(sys.argv[1]).resolve().as_uri())' "$html" 2>/dev/null || true)"
+  if [ -z "$url" ]; then rm -rf "$profile"; return 1; fi
+  "$CHROME" --headless=new --disable-gpu --hide-scrollbars --no-first-run \
+    --no-default-browser-check --user-data-dir="$profile" \
+    --window-size="$w,$h" --virtual-time-budget="$budget" \
+    --screenshot="$out" "$url" >/dev/null 2>&1 &
+  pid=$!
+  while [ ! -f "$out" ] && [ "$waited" -lt 40 ]; do sleep 0.2; waited=$((waited + 1)); done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  rm -rf "$profile"
+  [ -f "$out" ]
+}
+
 rm -rf "$BUILD"
 mkdir -p "$BUILD/$APP/Contents/MacOS" "$BUILD/$APP/Contents/Resources"
 
@@ -21,10 +44,7 @@ if [ -x "$CHROME" ]; then
   for d in "$RES"/wallpapers/*/; do
     id="$(basename "$d")"
     if [ ! -f "$RES/thumbs/$id.jpg" ] || [ "$d/index.html" -nt "$RES/thumbs/$id.jpg" ]; then
-      "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
-        --window-size=640,400 --virtual-time-budget=4000 \
-        --screenshot="/tmp/dyn_thumb_$id.png" "file://$d/index.html" >/dev/null 2>&1 || true
-      if [ -f "/tmp/dyn_thumb_$id.png" ]; then
+      if shot "/tmp/dyn_thumb_$id.png" 640 400 4000 "$d/index.html"; then
         sips -s format jpeg -s formatOptions 80 "/tmp/dyn_thumb_$id.png" --out "$RES/thumbs/$id.jpg" >/dev/null 2>&1 || true
         rm -f "/tmp/dyn_thumb_$id.png"
       fi
@@ -52,10 +72,7 @@ if [ -x "$CHROME" ]; then
   for d in "$RES"/wallpapers/*/; do
     id="$(basename "$d")"
     if [ ! -f "$RES/posters/$id.jpg" ] || [ "$d/index.html" -nt "$RES/posters/$id.jpg" ]; then
-      "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
-        --window-size=1470,956 --virtual-time-budget=5000 \
-        --screenshot="/tmp/dyn_poster_$id.png" "file://$d/index.html" >/dev/null 2>&1 || true
-      if [ -f "/tmp/dyn_poster_$id.png" ]; then
+      if shot "/tmp/dyn_poster_$id.png" 1470 956 5000 "$d/index.html"; then
         sips -Z 2940 -s format jpeg -s formatOptions 88 "/tmp/dyn_poster_$id.png" --out "$RES/posters/$id.jpg" >/dev/null 2>&1 || true
         rm -f "/tmp/dyn_poster_$id.png"
       fi
