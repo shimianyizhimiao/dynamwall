@@ -1034,6 +1034,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { NSApp.terminate(nil) }
             }
         }
+        if CommandLine.arguments.contains("--ui-test") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                self.showLibraryWindow()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    let m = self.libraryModel
+                    say("UITEST items=\(m.items.count) filtered_all=\(m.filtered.count)")
+                    m.filter = "影片"; say("UITEST filter=影片 → \(m.filtered.count)")
+                    m.filter = "內建"; say("UITEST filter=內建 → \(m.filtered.count)")
+                    m.filter = "我的 HTML"; say("UITEST filter=我的 HTML → \(m.filtered.count)")
+                    m.filter = "全部"; m.search = "NASA"; say("UITEST search=NASA → \(m.filtered.count)")
+                    m.search = "zzzz"; say("UITEST search=zzzz → \(m.filtered.count)")
+                    m.search = ""
+                    // 存快照：全部 → 搜尋 NASA → 搜尋無結果
+                    func snap(_ name: String) {
+                        guard let w = self.libraryWindow, let v = w.contentView,
+                              let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+                        v.cacheDisplay(in: v.bounds, to: rep)
+                        if let data = rep.representation(using: .png, properties: [:]) {
+                            try? data.write(to: URL(fileURLWithPath: "/tmp/ui-\(name).png"))
+                            say("UITEST snap=\(name) bytes=\(data.count)")
+                        }
+                    }
+                    snap("all")
+                    m.search = "NASA"
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        snap("nasa")
+                        m.search = "zzzz"
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                            snap("empty")
+                            m.search = ""
+                            say("UITEST done")
+                        }
+                    }
+                }
+            }
+        }
         if CommandLine.arguments.contains("--list-library") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 let items = scanLibrary()

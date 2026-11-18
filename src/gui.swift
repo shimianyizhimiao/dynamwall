@@ -740,7 +740,7 @@ struct LibraryView: View {
 
     // MARK: 資料
 
-    private var featured: [WallpaperItem] { model.items }
+    private var featured: [WallpaperItem] { model.filtered }
 
     private var heroItem: WallpaperItem? {
         guard !featured.isEmpty else { return nil }
@@ -748,13 +748,16 @@ struct LibraryView: View {
     }
 
     private var latest: [WallpaperItem] {
-        model.items.sorted { a, b in
+        model.filtered.sorted { a, b in
             (try? URL(fileURLWithPath: a.ref).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast >
             (try? URL(fileURLWithPath: b.ref).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
         }
     }
-    private var builtins: [WallpaperItem] { model.items.filter { $0.kind == "builtin" } }
-    private var mine: [WallpaperItem] { model.items.filter { $0.kind != "builtin" } }
+    private var builtins: [WallpaperItem] { model.filtered.filter { $0.kind == "builtin" } }
+    private var mine: [WallpaperItem] { model.filtered.filter { $0.kind != "builtin" } }
+
+    /// 有在搜尋或選了分類時，下面就不要硬分三列，直接列「篩選結果」
+    private var isFiltering: Bool { !model.search.isEmpty || model.filter != "全部" }
 
     // MARK: 主體
 
@@ -924,13 +927,30 @@ struct LibraryView: View {
     private var shelves: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                shelf("最新壁紙", latest)
-                if !builtins.isEmpty { shelf("精選動態壁紙", builtins) }
-                if !mine.isEmpty { shelf("我的壁紙", mine) }
+                if isFiltering {
+                    if featured.isEmpty {
+                        VStack(spacing: 8) {
+                            Text("找不到符合的壁紙").font(.system(size: 15, weight: .semibold))
+                            Text("換個關鍵字，或把分類切回「全部」").font(.system(size: 12)).foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 40)
+                    } else {
+                        shelf("篩選結果", featured)
+                    }
+                } else {
+                    shelf("最新壁紙", latest)
+                    if !builtins.isEmpty { shelf("精選動態壁紙", builtins) }
+                    if !mine.isEmpty { shelf("我的壁紙", mine) }
+                }
             }
             .padding(.vertical, 22)
         }
         .tourAnchor("grid")
+        .onChange(of: model.filter) { _, _ in heroIndex = 0
+            dbg("UI filter=\(model.filter) search=\(model.search) shown=\(featured.count)") }
+        .onChange(of: model.search) { _, _ in heroIndex = 0
+            dbg("UI filter=\(model.filter) search=\(model.search) shown=\(featured.count)") }
     }
 
     private func shelf(_ title: String, _ items: [WallpaperItem]) -> some View {
@@ -970,15 +990,22 @@ struct LibraryView: View {
 
     private var topBar: some View {
         HStack(spacing: 12) {
-            Button {
-                model.pickFiles()
+            Menu {
+                Button("加入檔案…（影片 / 圖片 / GIF / HTML）") { model.pickFiles() }
+                Button("匯入 Wallpaper Engine 網頁壁紙…") {
+                    NSApp.sendAction(#selector(AppDelegate.importWEAction), to: nil, from: nil)
+                }
+                Divider()
+                Button("開啟壁紙庫資料夾") { model.openLibraryFolder() }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 13, weight: .semibold))
                     .frame(width: 32, height: 32)
                     .background(Capsule().fill(.ultraThinMaterial))
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 32, height: 32)
             .help("加入壁紙")
             .tourAnchor("add")
 
