@@ -1,6 +1,15 @@
 # 動態壁紙 · DynWall
 
-一個原生的 macOS 動態壁紙程式：**影片、GIF、圖片、或自己寫的 HTML/CSS/JS 都可以當桌面壁紙**，
+**僅限 macOS** · macOS 13+ · Apple Silicon 與 Intel · Swift + AppKit · 無第三方依賴
+
+> ⚠️ **個人專案，可能還有一些 BUG。** 只在 macOS 26.4 / Apple Silicon 實測過。
+> 遇到問題請開 Issue，並附上你的 macOS 版本與 `~/Library/Logs/動態壁紙.log`。
+
+[繁體中文](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt-BR.md) · [Русский](README.ru.md) · [Italiano](README.it.md)
+
+📖 **完整使用說明（step-by-step）：[docs/使用說明.md](docs/使用說明.md)**
+
+一個原生的 macOS 動態壁紙程式：**影片、GIF、圖片、或自己寫的 HTML/CSS/JS 都可以變成桌面壁紙**，
 畫在**系統桌布之上、桌面圖示之下**（桌面圖示、右鍵選單、拖檔案、Mission Control 全部照常），
 附一個圖形化壁紙庫。
 
@@ -35,8 +44,24 @@ no third-party dependencies.
 ## 系統需求
 
 - macOS 13 以上（Apple Silicon / Intel）
-- Xcode Command Line Tools：`xcode-select --install`
-- 選用：Google Chrome —— `build.sh` 用它無頭渲染內建壁紙的縮圖與高解析海報；沒有也能編，只是少縮圖
+- Xcode Command Line Tools（`swiftc`）—— `xcode-select --install`
+- 選用：Google Chrome（`build.sh` 用它無頭渲染內建壁紙的縮圖與高解析海報；沒有也能編，只是內建壁紙會少縮圖）
+
+## 相容性
+
+| macOS | 狀態 |
+|---|---|
+| 26.x（開發機 26.4） | ✅ 實測 |
+| 15 Sequoia | ⚠️ 未實測（API 可用） |
+| 14 Sonoma | ⚠️ 未實測 |
+| 13 Ventura | ⚠️ 以 macOS 13 SDK 編譯通過，未實測 |
+| 12 及更舊 | ❌ 不支援 |
+
+`arm64` 與 `x86_64` 都以 macOS 13 為部署目標編譯成功；實際產出的二進位是「你編譯的那台 Mac」的架構。若要通用二進位，把兩個架構都用 `lipo` 合併：
+
+```bash
+lipo -create build_arm64/DynWall build_x86_64/DynWall -output DynWall.universal
+```
 
 ## 建置
 
