@@ -81,7 +81,7 @@ struct Config: Codable {
     var paused = false
     var autoStart = false
     var poster = true         // 套用壁紙時，同步把「靜態海報圖」設成系統桌布（關掉 App 後桌面仍是同一張）
-    var parallaxOn = true     // 視差：滑鼠移動時，壁紙微微跟著往同方向位移
+    var parallaxOn = false    // 視差：預設關閉（想要景深感的使用者自己在設定裡開）
     var parallax = 10.0       // 位移幅度（像素）；壁紙會先放大一點避免露邊
 
     init() {}
@@ -102,7 +102,7 @@ struct Config: Codable {
         paused = (try? c.decode(Bool.self, forKey: .paused)) ?? false
         autoStart = (try? c.decode(Bool.self, forKey: .autoStart)) ?? false
         poster = (try? c.decode(Bool.self, forKey: .poster)) ?? true
-        parallaxOn = (try? c.decode(Bool.self, forKey: .parallaxOn)) ?? true
+        parallaxOn = (try? c.decode(Bool.self, forKey: .parallaxOn)) ?? false
         parallax = (try? c.decode(Double.self, forKey: .parallax)) ?? 10.0
     }
 }
