@@ -22,11 +22,30 @@ struct SettingsView: View {
             advanced.tabItem { Label("進階", systemImage: "wrench.and.screwdriver") }
             about.tabItem { Label("關於", systemImage: "info.circle") }
         }
-        .frame(width: 620, height: 440)
+        .frame(width: 620, height: 470)
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Spacer()
+                Button("完成") { closeSelf() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 12)
+        }
         .onAppear { reload(); cacheMB = Self.cacheSizeMB() }
     }
 
     private func reload() { cfg = Engine.shared.config }
+
+    /// sheet 或獨立視窗都能關：有 sheet 父視窗就 endSheet，否則直接關
+    private func closeSelf() {
+        guard let w = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.title.contains("設定") }) else { return }
+        if let parent = w.sheetParent {
+            parent.endSheet(w)
+        } else {
+            w.close()
+        }
+    }
 
     // MARK: 一般
 

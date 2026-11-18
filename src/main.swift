@@ -982,8 +982,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                 self.showSettingsWindow()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    let order = NSApp.windows.filter { $0.isVisible }.map { "\($0.title)@\(Int($0.frame.minX)),\(Int($0.frame.minY))" }.joined(separator: " | ")
+                    say("SETTINGSTEST appActive=\(NSApp.isActive) key=\(NSApp.keyWindow?.title ?? "-") order=[\(order)]")
                     if let w = self.settingsWindow {
-                        say("SETTINGSTEST frame=\(Int(w.frame.width))x\(Int(w.frame.height)) visible=\(w.isVisible) title=\(w.title)")
+                        say("SETTINGSTEST frame=\(Int(w.frame.width))x\(Int(w.frame.height)) visible=\(w.isVisible) onActiveSpace=\(w.isOnActiveSpace) level=\(w.level.rawValue) sheet=\(w.sheetParent != nil) title=\(w.title)")
+                        // 把視窗內容自己畫成點陣圖，證明「有畫出來」（不依賴螢幕錄影權限）
+                        if let v = w.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                            v.cacheDisplay(in: v.bounds, to: rep)
+                            if let data = rep.representation(using: .png, properties: [:]) {
+                                try? data.write(to: URL(fileURLWithPath: "/tmp/settings-snap.png"))
+                                say("SETTINGSTEST snapshot bytes=\(data.count) px=\(rep.pixelsWide)x\(rep.pixelsHigh)")
+                            }
+                        }
                     } else {
                         say("SETTINGSTEST nil")
                     }
@@ -1723,6 +1733,12 @@ extension AppDelegate {
 
     // 已經在執行時，使用者又雙擊 App／按 Dock 圖示 → 把壁紙庫視窗叫出來
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // 設定窗開著時（例如在 Dock 點一下 App）不要把壁紙庫又叫到設定窗上面
+        if let s = settingsWindow, s.isVisible {
+            s.orderFrontRegardless()
+            s.makeKey()
+            return true
+        }
         showLibraryWindow()
         return true
     }
@@ -1813,6 +1829,11 @@ extension AppDelegate {
                              backing: .buffered, defer: false)
             w.title = "動態壁紙 設定"
             w.isReleasedWhenClosed = false
+            // 一定要能跟著使用者跑到目前這個 Space，不然會「看起來沒開」
+            w.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+            w.level = .floating   // 測試：浮動層級能不能壓過壁紙庫
+            w.hidesOnDeactivate = false
+            w.isMovableByWindowBackground = false
             w.contentView = NSHostingView(rootView: SettingsView())
             w.center()
             settingsWindow = w
@@ -1820,7 +1841,25 @@ extension AppDelegate {
         }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        // 壁紙庫開著就用 sheet 貼在它上面：sheet 一定跟著壁紙庫出現在同一個 Space，
+        // 不會像獨立視窗那樣被壓在後面（使用者會覺得「按了沒反應」）
+        if let lib = libraryWindow, lib.isVisible, let w = settingsWindow, w.sheetParent == nil {
+            lib.beginSheet(w)
+            say("SETTINGS-SHEET")
+            return
+        }
+        settingsWindow?.orderFrontRegardless()
+        settingsWindow?.makeKey()
+        if let w = settingsWindow {
+            say("SETTINGS-FRONT visible=\(w.isVisible) key=\(w.isKeyWindow) occl=\(w.occlusionState.contains(.visible))")
+        }
+        // 再補一次：啟動 App／Dock 點擊可能觸發 reopen，把壁紙庫又抬上來
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let w = self?.settingsWindow else { return }
+            w.orderFrontRegardless()
+            w.makeKey()
+            say("SETTINGS-FRONT2 occl=\(w.occlusionState.contains(.visible))")
+        }
     }
 
     @objc func showSettingsAction() { showSettingsWindow() }
