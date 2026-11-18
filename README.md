@@ -7,6 +7,7 @@
 
 [繁體中文](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt-BR.md) · [Русский](README.ru.md) · [Italiano](README.it.md)
 
+🌐 **官網：<https://shimianyizhimiao.github.io/dynamwall/>** · 
 📖 **完整使用說明（step-by-step）：[docs/使用說明.md](docs/使用說明.md)**
 
 一個原生的 macOS 動態壁紙程式：**影片、GIF、圖片、或自己寫的 HTML/CSS/JS 都可以變成桌面壁紙**，
