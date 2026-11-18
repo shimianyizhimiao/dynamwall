@@ -589,359 +589,404 @@ struct ItemCard: View {
     }
 }
 
-// MARK: ───────────────────────── 主介面
+// MARK: ───────────────────────── 主介面：大圖 hero + 橫向卡片列
+
+struct RowCard: View {
+    @ObservedObject var item: WallpaperItem
+    let current: Bool
+    let onTap: () -> Void
+    let onApply: () -> Void
+    let onReveal: () -> Void
+    @State private var hover = false
+
+    private var badge: String {
+        switch item.kind {
+        case "video": return "動態"
+        case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : "靜態"
+        case "web": return "HTML"
+        default: return "內建"
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Group {
+                if let t = item.thumb {
+                    Image(nsImage: t).resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    LinearGradient(colors: [Color.black.opacity(0.8), Color.black.opacity(0.45)],
+                                   startPoint: .top, endPoint: .bottom)
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .frame(width: 320, height: 180)
+            .clipped()
+
+            LinearGradient(colors: [.black.opacity(0.85), .clear], startPoint: .bottom, endPoint: .center)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title).font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white).lineLimit(1)
+                Text(item.subtitle).font(.system(size: 9))
+                    .foregroundColor(.white.opacity(0.7)).lineLimit(1)
+            }
+            .padding(10)
+
+            VStack {
+                HStack {
+                    Text(badge)
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.black.opacity(0.5))
+                        .foregroundColor(.white)
+                        .cornerRadius(4)
+                    if current {
+                        Text("使用中")
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.accentColor)
+                            .foregroundColor(.white)
+                            .cornerRadius(4)
+                    }
+                    Spacer()
+                }
+                .padding(8)
+                Spacer()
+                if hover && !current {
+                    HStack {
+                        Spacer()
+                        Button(action: onApply) {
+                            Label("設為桌布", systemImage: "checkmark.circle.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                    .padding(8)
+                }
+            }
+        }
+        .frame(width: 320, height: 180)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14)
+            .stroke(Color.white.opacity(hover ? 0.45 : 0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(hover ? 0.4 : 0.2), radius: hover ? 16 : 8, y: hover ? 8 : 4)
+        .scaleEffect(hover ? 1.03 : 1.0)
+        .animation(.easeOut(duration: 0.15), value: hover)
+        .contentShape(Rectangle())
+        .onHover { hover = $0 }
+        .onTapGesture { onTap() }
+        .contextMenu {
+            Button("套用到桌面") { onApply() }.disabled(current)
+            Button("在 Finder 顯示") { onReveal() }
+        }
+    }
+}
 
 struct LibraryView: View {
     @ObservedObject var model: LibraryModel
     @ObservedObject var tour = TourState.shared
+    @State private var heroIndex = 0
+    @State private var heroPaused = false
+
+    private let heroTimer = Timer.publish(every: 6.0, on: .main, in: .common).autoconnect()
+
+    // MARK: 資料
+
+    private var featured: [WallpaperItem] { model.items }
+
+    private var heroItem: WallpaperItem? {
+        guard !featured.isEmpty else { return nil }
+        return featured[min(heroIndex, featured.count - 1)]
+    }
+
+    private var latest: [WallpaperItem] {
+        model.items.sorted { a, b in
+            (try? URL(fileURLWithPath: a.ref).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast >
+            (try? URL(fileURLWithPath: b.ref).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        }
+    }
+    private var builtins: [WallpaperItem] { model.items.filter { $0.kind == "builtin" } }
+    private var mine: [WallpaperItem] { model.items.filter { $0.kind != "builtin" } }
+
+    // MARK: 主體
 
     var body: some View {
-        ZStack {
-            HStack(spacing: 0) {
-                libraryPane
-                Divider()
-                inspector.frame(width: 320)
+        ZStack(alignment: .top) {
+            GeometryReader { g in
+                VStack(spacing: 0) {
+                    // 視窗小的時候 hero 跟著縮，下面的卡片列才看得到
+                    hero.frame(height: min(max(g.size.height * 0.56, 300), 470))
+                    shelves
+                }
             }
-            .frame(minWidth: 1000, minHeight: 640)
             .background(.regularMaterial)
 
-            if tour.active {
-                TourOverlay(tour: tour)
-            }
+            topBar.padding(.horizontal, 22).padding(.top, 14)
+
+            if tour.active { TourOverlay(tour: tour) }
         }
         .coordinateSpace(name: "dynwall-window")
         .onPreferenceChange(TourAnchorKey.self) { r in
-            // 版面量測是在更新中進行的，推到下一個 runloop 再改狀態，避免 "Modifying state during view update"
             DispatchQueue.main.async { tour.rects = r }
         }
         .onAppear {
             model.refresh()
-            if model.selectedID == nil { model.selectedID = model.filtered.first?.id }
+            if model.selectedID == nil { model.selectedID = model.items.first?.id }
             tour.startIfNeeded()
         }
+        .onReceive(heroTimer) { _ in
+            guard !heroPaused, featured.count > 1, !tour.active else { return }
+            withAnimation(.easeInOut(duration: 0.55)) { heroIndex = (heroIndex + 1) % featured.count }
+        }
     }
 
-    /// 開頭的大圖：目前選取的那張放大成 banner
+    // MARK: 大圖
+
     private var hero: some View {
-        ZStack(alignment: .bottomLeading) {
-            Group {
-                if let t = model.selected?.thumb {
-                    Image(nsImage: t).resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    LinearGradient(colors: [Color(red: 0.10, green: 0.12, blue: 0.22),
-                                            Color(red: 0.30, green: 0.14, blue: 0.38)],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-
-            LinearGradient(colors: [.black.opacity(0.88), .black.opacity(0.25), .clear],
-                           startPoint: .bottom, endPoint: .center)
-
-            HStack(alignment: .bottom, spacing: 14) {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
-                        if let s = model.selected, model.isCurrent(s) {
-                            Text("使用中")
-                                .font(.system(size: 9, weight: .bold))
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.accentColor)
-                                .foregroundColor(.white)
-                                .cornerRadius(4)
-                        }
-                        Text(selectedKindLabel)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.65))
+        GeometryReader { geo in
+            ZStack(alignment: .bottomLeading) {
+                Group {
+                    if let t = heroItem?.thumb {
+                        Image(nsImage: t).resizable().aspectRatio(contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                    } else {
+                        LinearGradient(colors: [Color(red: 0.07, green: 0.09, blue: 0.18),
+                                                Color(red: 0.28, green: 0.12, blue: 0.36)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
                     }
-                    Text(model.selected?.title ?? "選一張壁紙開始")
-                        .font(.system(size: 22, weight: .bold))
+                }
+
+                // 左下的暗角，文字才看得清楚（跟他一樣由下往上漸層）
+                LinearGradient(colors: [.black.opacity(0.9), .black.opacity(0.35), .clear],
+                               startPoint: .bottomLeading, endPoint: .center)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("精選")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.65))
+
+                    Text(heroItem?.title ?? "還沒有壁紙")
+                        .font(.system(size: 44, weight: .bold, design: .serif))
                         .foregroundColor(.white)
                         .lineLimit(1)
-                    Text(model.selected?.subtitle ?? "點左邊任何一張，這裡會放大成這樣")
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.72))
-                        .lineLimit(1)
-                }
 
-                Spacer()
+                    Text(metaLine)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.7))
 
-                Button {
-                    model.applySelected()
-                } label: {
-                    Label("套用到桌面", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(model.selected == nil || (model.selected.map { model.isCurrent($0) } ?? true))
-            }
-            .padding(18)
-        }
-        .frame(height: 200)
-        .cornerRadius(14)
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.08)))
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
-    }
-
-    private var selectedKindLabel: String {
-        guard let s = model.selected else { return "" }
-        switch s.kind {
-        case "video": return "影片"
-        case "image": return s.ref.lowercased().hasSuffix(".gif") ? "GIF" : "圖片"
-        case "web": return "HTML 動態"
-        default: return "內建動態壁紙"
-        }
-    }
-
-    private func sectionTitle(_ t: String, _ n: Int) -> some View {
-        HStack(spacing: 8) {
-            Text(t).font(.system(size: 13, weight: .bold))
-            Text("\(n)")
-                .font(.system(size: 10, weight: .semibold))
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(Color.primary.opacity(0.08))
-                .cornerRadius(5)
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-    }
-
-    private func wallGrid(_ items: [WallpaperItem]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 16)], spacing: 16) {
-            ForEach(items) { it in
-                ItemCard(item: it,
-                         current: model.isCurrent(it),
-                         selected: model.selectedID == it.id,
-                         onTap: { model.selectedID = it.id },
-                         onApply: { model.apply(it) },
-                         onReveal: { model.reveal(it) },
-                         onEdit: it.kind == "web" ? { model.editHTML(it) } : nil,
-                         onDelete: it.canDelete ? { model.delete(it) } : nil)
-            }
-        }
-        .padding(.horizontal, 12)
-    }
-
-    private var libraryPane: some View {
-        VStack(spacing: 0) {
-            hero
-            VStack(spacing: 8) {
-                // 第一列：類型切換（讓它用自然寬度，不要硬塞固定寬度被裁掉）
-                HStack(spacing: 10) {
-                    Picker("", selection: $model.filter) {
-                        ForEach(model.filters, id: \.self) { Text($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                    .tourAnchor("filters")
-
-                    Spacer()
-
-                    Text("顯示 \(model.filtered.count) / 共 \(model.items.count) 張")
-                        .font(.system(size: 10)).foregroundColor(.secondary)
-                }
-
-                // 第二列：搜尋、排序、動作
-                HStack(spacing: 10) {
-                    TextField("搜尋…", text: $model.search)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 120, maxWidth: 200)
-
-                    Picker("", selection: $model.sort) {
-                        ForEach(model.sorts, id: \.self) { Text($0) }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .fixedSize()
-
-                    Spacer()
-
-                    Button {
-                        model.pickFiles()
-                    } label: { Label("加入壁紙", systemImage: "plus") }
-                    .labelStyle(.titleAndIcon)
-                    .fixedSize()
-                    .tourAnchor("add")
-
-                    Button {
-                        model.refresh()
-                    } label: { Image(systemName: "arrow.clockwise") }
-                    .help("重新整理")
-
-                    Button {
-                        tour.replay()
-                    } label: { Image(systemName: "questionmark.circle") }
-                    .help("再看一次使用導覽")
-
-                    Button {
-                        NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
-                    } label: { Image(systemName: "gearshape") }
-                    .help("設定（⌘,）")
-                }
-            }
-            .padding(12)
-
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    if model.filter == "全部" && model.search.isEmpty {
-                        let builtins = model.filtered.filter { $0.kind == "builtin" }
-                        let mine = model.filtered.filter { $0.kind != "builtin" }
-                        if !builtins.isEmpty {
-                            sectionTitle("內建精選", builtins.count)
-                            wallGrid(builtins)
-                        }
-                        if !mine.isEmpty {
-                            sectionTitle("我的壁紙", mine.count)
-                            wallGrid(mine)
-                        }
-                    } else {
-                        wallGrid(model.filtered)
-                    }
-                }
-                .padding(.top, 4)
-                .padding(.bottom, 14)
-            }
-            .tourAnchor("grid")
-
-            Divider()
-            HStack(spacing: 8) {
-                Text(model.message.isEmpty
-                     ? "點縮圖看預覽，雙擊直接套用；右鍵有更多選項（Finder、編輯 HTML、刪除）"
-                     : model.message)
-                    .font(.system(size: 11)).foregroundColor(.secondary)
-                    .lineLimit(1)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14).padding(.vertical, 6)
-        }
-        .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
-            var urls: [URL] = []
-            let group = DispatchGroup()
-            for p in providers {
-                group.enter()
-                p.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                    if let data = item as? Data, let u = URL(dataRepresentation: data, relativeTo: nil) {
-                        urls.append(u)
-                    }
-                    group.leave()
-                }
-            }
-            group.notify(queue: .main) { model.addFiles(urls) }
-            return true
-        }
-    }
-
-    private var inspector: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("預覽").font(.system(size: 11, weight: .bold)).foregroundColor(.secondary)
-                LivePreview(item: model.selected)
-                    .frame(height: 180)
-                    .cornerRadius(8)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.15)))
-
-                if let s = model.selected {
-                    Text(s.title).font(.system(size: 16, weight: .bold))
-                    Text(s.subtitle).font(.system(size: 11)).foregroundColor(.secondary)
-
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         Button {
-                            model.apply(s)
+                            if let h = heroItem { model.apply(h) }
                         } label: {
-                            Label(model.isCurrent(s) ? "使用中" : "套用到桌面", systemImage: "checkmark.circle")
+                            Label(model.selected.map { model.isCurrent($0) } == true ? "使用中" : "套用到桌面",
+                                  systemImage: "play.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .padding(.horizontal, 6).padding(.vertical, 3)
                         }
-                        .disabled(model.isCurrent(s))
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(heroItem == nil || (heroItem.map { model.isCurrent($0) } ?? true))
                         .tourAnchor("apply")
 
-                        if s.canDelete {
-                            Button(role: .destructive) {
-                                model.delete(s)
-                            } label: { Image(systemName: "trash") }
+                        Button {
+                            if let h = heroItem { model.reveal(h) }
+                        } label: {
+                            Label("在 Finder 顯示", systemImage: "folder")
+                                .font(.system(size: 12))
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
                     }
-                } else {
-                    Text("從左邊挑一個壁紙").font(.system(size: 12)).foregroundColor(.secondary)
+                    .padding(.top, 6)
                 }
+                .padding(.leading, 44)
+                .padding(.bottom, 54)
 
-                Divider()
-                Text("選項").font(.system(size: 11, weight: .bold)).foregroundColor(.secondary)
-
-                Toggle("播放中（取消＝暫停）", isOn: Binding(
-                    get: { !model.cfg.paused },
-                    set: { Engine.shared.setPaused(!$0); model.cfg = Engine.shared.config }))
-
-                Toggle("靜音", isOn: Binding(
-                    get: { model.cfg.mute },
-                    set: { Engine.shared.setMute($0); model.cfg = Engine.shared.config }))
-
-                Toggle("允許滑鼠互動（自訂網頁壁紙）", isOn: Binding(
-                    get: { model.cfg.interactive },
-                    set: { Engine.shared.setInteractive($0); model.cfg = Engine.shared.config }))
-
-                Toggle("開機自動啟動", isOn: Binding(
-                    get: { model.cfg.autoStart },
-                    set: { Engine.shared.setAutoStart($0); model.cfg = Engine.shared.config }))
-
-                Toggle("關掉 App 後桌面保留同一張（靜態）", isOn: Binding(
-                    get: { model.cfg.poster },
-                    set: { Engine.shared.setPoster($0); model.cfg = Engine.shared.config }))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("播放速度：\(String(format: "%.1fx", model.cfg.rate))")
-                        .font(.system(size: 11))
-                    Slider(value: Binding(
-                        get: { model.cfg.rate },
-                        set: { model.cfg.rate = $0 }),
-                           in: 0.25...2.0, step: 0.25) { _ in
-                        Engine.shared.setRate(model.cfg.rate)
-                    }
+                // 左右箭頭
+                HStack {
+                    arrow("chevron.left") { step(-1) }
+                    Spacer()
+                    arrow("chevron.right") { step(1) }
                 }
+                .padding(.horizontal, 20)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("暗化：\(Int(model.cfg.dim * 100))%（讓桌面圖示更清楚）").font(.system(size: 11))
-                    Slider(value: Binding(
-                        get: { model.cfg.dim },
-                        set: { model.cfg.dim = $0 }),
-                           in: 0...0.7, step: 0.1) { _ in
-                        Engine.shared.setDim(model.cfg.dim)
-                    }
+                // 頁點
+                VStack {
+                    Spacer()
+                    dots.padding(.bottom, 18)
                 }
-
-                Picker("畫面縮放", selection: Binding(
-                    get: { model.cfg.gravity },
-                    set: { Engine.shared.setGravity($0); model.cfg = Engine.shared.config })) {
-                    Text("填滿畫面（裁切）").tag("fill")
-                    Text("完整顯示（黑邊）").tag("fit")
-                    Text("延展變形").tag("stretch")
-                }
-                .pickerStyle(.menu)
-
-                Divider()
-                Text("壁紙庫").font(.system(size: 11, weight: .bold)).foregroundColor(.secondary)
-                Button {
-                    _ = model.importBuiltinsAsTemplates()
-                } label: { Label("把內建壁紙複製成可編輯範本", systemImage: "doc.on.doc") }
-                Button {
-                    model.openLibraryFolder()
-                } label: { Label("開啟壁紙資料夾", systemImage: "folder") }
-
-                Text("把影片 / 圖片拖進這個視窗也可以加入")
-                    .font(.system(size: 10)).foregroundColor(.secondary)
-
-                Text("共 \(model.items.count) 個壁紙")
-                    .font(.system(size: 10)).foregroundColor(.secondary)
+                .frame(maxWidth: .infinity)
             }
-            .padding(16)
+            .frame(width: geo.size.width, height: geo.size.height)
+            .clipped()
+            .tourAnchor("inspector")
         }
-        .tourAnchor("inspector")
-        .background(Color.primary.opacity(0.03))
+        .frame(height: 430)
+        .onHover { heroPaused = $0 }
+    }
+
+    private var metaLine: String {
+        guard let h = heroItem else { return "" }
+        var bits: [String] = []
+        switch h.kind {
+        case "video": bits.append("動態影片")
+        case "image": bits.append(h.ref.lowercased().hasSuffix(".gif") ? "GIF 動圖" : "靜態圖片")
+        case "web": bits.append("HTML 動態")
+        default: bits.append("內建動態")
+        }
+        bits.append(h.subtitle)
+        return bits.joined(separator: " ‧ ")
+    }
+
+    private func arrow(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(.ultraThinMaterial))
+                .overlay(Circle().stroke(Color.white.opacity(0.2)))
+        }
+        .buttonStyle(.plain)
+        .disabled(featured.count < 2)
+    }
+
+    private var dots: some View {
+        HStack(spacing: 7) {
+            ForEach(0..<min(featured.count, 12), id: \.self) { i in
+                Circle()
+                    .fill(i == heroIndex ? Color.white : Color.white.opacity(0.3))
+                    .frame(width: i == heroIndex ? 7 : 5, height: i == heroIndex ? 7 : 5)
+                    .onTapGesture { withAnimation(.easeInOut(duration: 0.3)) { heroIndex = i } }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(Capsule().fill(.black.opacity(0.25)))
+    }
+
+    private func step(_ d: Int) {
+        guard featured.count > 1 else { return }
+        withAnimation(.easeInOut(duration: 0.45)) {
+            heroIndex = (heroIndex + d + featured.count) % featured.count
+        }
+    }
+
+    // MARK: 下面的橫向卡片列
+
+    private var shelves: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 26) {
+                shelf("最新壁紙", latest)
+                if !builtins.isEmpty { shelf("精選動態壁紙", builtins) }
+                if !mine.isEmpty { shelf("我的壁紙", mine) }
+            }
+            .padding(.vertical, 22)
+        }
+        .tourAnchor("grid")
+    }
+
+    private func shelf(_ title: String, _ items: [WallpaperItem]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text(title).font(.system(size: 17, weight: .bold))
+                Image(systemName: "chevron.right.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text("\(items.count) 張").font(.system(size: 10)).foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 28)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    ForEach(items) { it in
+                        RowCard(item: it,
+                                current: model.isCurrent(it),
+                                onTap: {
+                                    model.selectedID = it.id
+                                    if let idx = featured.firstIndex(where: { $0.id == it.id }) {
+                                        withAnimation(.easeInOut(duration: 0.35)) { heroIndex = idx }
+                                    }
+                                },
+                                onApply: { model.apply(it) },
+                                onReveal: { model.reveal(it) })
+                    }
+                }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    // MARK: 頂部工具列（膠囊分頁 + 右側按鈕）
+
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                model.pickFiles()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 32, height: 32)
+                    .background(Capsule().fill(.ultraThinMaterial))
+            }
+            .buttonStyle(.plain)
+            .help("加入壁紙")
+            .tourAnchor("add")
+
+            Spacer()
+
+            HStack(spacing: 2) {
+                ForEach(model.filters, id: \.self) { f in
+                    Button {
+                        model.filter = f
+                    } label: {
+                        Text(f)
+                            .font(.system(size: 12, weight: model.filter == f ? .semibold : .regular))
+                            .foregroundColor(model.filter == f ? .primary : .secondary)
+                            .padding(.horizontal, 14).padding(.vertical, 7)
+                            .background(Capsule().fill(model.filter == f ? Color.primary.opacity(0.12) : Color.clear))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(Capsule().fill(.ultraThinMaterial))
+            .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+            .tourAnchor("filters")
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                TextField("搜尋…", text: $model.search)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11))
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .frame(width: 140)
+                    .background(Capsule().fill(.ultraThinMaterial))
+
+                Button { tour.replay() } label: {
+                    Image(systemName: "questionmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(.ultraThinMaterial))
+                }
+                .buttonStyle(.plain)
+                .help("再看一次使用導覽")
+
+                Button {
+                    NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(.ultraThinMaterial))
+                }
+                .buttonStyle(.plain)
+                .help("設定（⌘,）")
+            }
+        }
     }
 }
