@@ -6,6 +6,7 @@
 //  macOS 桌面動態壁紙：影片 / HTML(CSS+JS) / 圖片 GIF
 //  視窗放在「桌面圖示之下、桌面圖片之上」，所以桌面上按右鍵、點圖示都正常。
 import Cocoa
+import ImageIO
 import AVFoundation
 import WebKit
 import UniformTypeIdentifiers
@@ -261,6 +262,25 @@ func writePNGFile(_ cg: CGImage, to url: URL) -> Bool {
     return (try? data.write(to: url)) != nil
 }
 
+/// 把圖裁成「螢幕比例」（置中裁切）。系統桌布是等比縮放放進螢幕，
+/// 圖片比例跟螢幕不同就會上下或左右留黑邊 —— 先裁掉就不會有黑邊。
+func croppedToScreenAspect(_ cg: CGImage, screen: NSScreen) -> CGImage {
+    let target = screen.frame.width / max(screen.frame.height, 1)
+    let w = CGFloat(cg.width), h = CGFloat(cg.height)
+    let imgAspect = w / max(h, 1)
+    var rect = CGRect(x: 0, y: 0, width: w, height: h)
+    if imgAspect > target {
+        // 圖太寬 → 裁左右
+        let newW = (h * target).rounded()
+        rect = CGRect(x: ((w - newW) / 2).rounded(), y: 0, width: max(newW, 1), height: h)
+    } else if imgAspect < target {
+        // 圖太高 → 裁上下
+        let newH = (w / target).rounded()
+        rect = CGRect(x: 0, y: ((h - newH) / 2).rounded(), width: w, height: max(newH, 1))
+    }
+    return cg.cropping(to: rect) ?? cg
+}
+
 /// 簡單的整數盒子（給「等待 N 個非同步工作完成」用）
 final class IntBox {
     var value: Int
@@ -450,11 +470,22 @@ final class ScreenWallpaper {
             guard let self = self else { done?(); return }
             if let url = url {
                 // 桌布已經是同一張就不要重設：重設會讓系統桌布重畫一次，很容易被看成「閃一下」
+                // 但「同一來源、比例卻不對」（舊版海報沒裁切）時仍要重設，否則黑邊會留著
                 let h = shortHash(self.cfg.kind + "|" + self.cfg.ref)
-                if let cur = NSWorkspace.shared.desktopImageURL(for: self.screen)?.lastPathComponent,
-                   cur == url.lastPathComponent || cur.hasPrefix("poster-\(h)-") {
-                    say("POSTER-SKIP screen=\(self.displayID) 已是同一張")
-                    done?(); return
+                if let curURL = NSWorkspace.shared.desktopImageURL(for: self.screen) {
+                    let cur = curURL.lastPathComponent
+                    if cur == url.lastPathComponent || cur.hasPrefix("poster-\(h)-") {
+                        let screenAspect = Double(self.screen.frame.width / max(self.screen.frame.height, 1))
+                        var aspectOK = true
+                        if let img = NSImage(contentsOf: curURL), let rep = img.representations.first, rep.pixelsHigh > 0 {
+                            aspectOK = abs(Double(rep.pixelsWide) / Double(rep.pixelsHigh) - screenAspect) < 0.01
+                        }
+                        if aspectOK {
+                            say("POSTER-SKIP screen=\(self.displayID) 已是同一張")
+                            done?(); return
+                        }
+                        say("POSTER-REDO screen=\(self.displayID) 比例不符（舊海報未裁切）")
+                    }
                 }
                 let opts: [NSWorkspace.DesktopImageOptionKey: Any] = [
                     .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
@@ -479,10 +510,21 @@ final class ScreenWallpaper {
             finish(u); return
         }
 
-        // 2) 圖片／GIF：直接用原檔（品質最好，macOS 取第一格）
+        // 2) 圖片：裁成螢幕比例再設（避免黑邊）；GIF 直接用原檔（保留動畫）
         if cfg.kind == "image" {
             let src = URL(fileURLWithPath: resolveRef(cfg.ref))
-            if fm.fileExists(atPath: src.path) { finish(src); return }
+            if fm.fileExists(atPath: src.path) {
+                if src.pathExtension.lowercased() == "gif" { finish(src); return }
+                if let cgSrc = CGImageSourceCreateWithURL(src as CFURL, nil),
+                   let cg = CGImageSourceCreateImageAtIndex(cgSrc, 0, nil),
+                   let dst = newPosterURL("png") {
+                    let cut = croppedToScreenAspect(cg, screen: screen)
+                    finish(writePNGFile(cut, to: dst) ? dst : src)
+                    return
+                }
+                finish(src)
+                return
+            }
         }
 
         // 3) 影片：抽「現在這一格」，關掉 App 時桌面就停在這裡
@@ -497,7 +539,10 @@ final class ScreenWallpaper {
                 let t = player?.currentTime() ?? CMTime(seconds: 2.5, preferredTimescale: 600)
                 gen.generateCGImagesAsynchronously(forTimes: [NSValue(time: t)]) { _, cg, _, _, err in
                     var out: URL?
-                    if let cg = cg { out = writePNGFile(cg, to: dst) ? dst : nil }
+                    if let cg = cg {
+                        let cut = croppedToScreenAspect(cg, screen: self.screen)   // 裁成螢幕比例，桌布才不會有黑邊
+                        out = writePNGFile(cut, to: dst) ? dst : nil
+                    }
                     if let err = err { dbg("抽影片格失敗：\(err.localizedDescription)") }
                     DispatchQueue.main.async { finish(out) }
                 }
@@ -1636,12 +1681,20 @@ extension AppDelegate {
                 }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                // 記住使用者原本的設定，測完要還原（不然會被留在暗化 0.3／速度 1.5／留黑邊）
+                let oldDim = cfg.dim, oldRate = cfg.rate, oldGravity = cfg.gravity
                 Engine.shared.setDim(0.3)
                 Engine.shared.setRate(1.5)
                 Engine.shared.setGravity("fit")
                 say("GUITEST settings dim=0.3 rate=1.5 gravity=fit")
                 let thumbs = (try? fm.contentsOfDirectory(atPath: CACHE_DIR.appendingPathComponent("thumbs").path)) ?? []
                 say("GUITEST thumb-cache=\(thumbs.count)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    Engine.shared.setDim(oldDim)
+                    Engine.shared.setRate(oldRate)
+                    Engine.shared.setGravity(oldGravity)
+                    say("GUITEST restored dim=\(oldDim) rate=\(oldRate) gravity=\(oldGravity)")
+                }
             }
         }
     }
