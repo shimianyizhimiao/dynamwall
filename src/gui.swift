@@ -1,3 +1,7 @@
+// Required Notice: Copyright (c) 2026 shimianyizhimiao — 動態壁紙 / DynWall
+// 授權：PolyForm Noncommercial 1.0.0 + Share-Alike 附加條款（見 LICENSE）
+// 禁止商業使用；修改後散布必須以相同條款公開原始碼。
+
 //  動態壁紙 — 圖形化壁紙庫（像 Wallpaper Engine 那樣）
 //  左邊：壁紙庫（縮圖格狀）　右邊：即時預覽 + 設定
 import Cocoa

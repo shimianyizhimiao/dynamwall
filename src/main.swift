@@ -1,3 +1,7 @@
+// Required Notice: Copyright (c) 2026 shimianyizhimiao — 動態壁紙 / DynWall
+// 授權：PolyForm Noncommercial 1.0.0 + Share-Alike 附加條款（見 LICENSE）
+// 禁止商業使用；修改後散布必須以相同條款公開原始碼。
+
 //  動態壁紙 DynWall
 //  macOS 桌面動態壁紙：影片 / HTML(CSS+JS) / 圖片 GIF
 //  視窗放在「桌面圖示之下、桌面圖片之上」，所以桌面上按右鍵、點圖示都正常。
@@ -1190,7 +1194,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(action("回復成內建・極光", #selector(resetDefault)))
         menu.addItem(action("開啟設定檔（config.json）", #selector(openConfig)))
         menu.addItem(.separator())
+        menu.addItem(action("關於動態壁紙…", #selector(showAbout)))
         menu.addItem(action("結束動態壁紙", #selector(quitApp)))
+    }
+
+    /// 關於：帶著作者與授權資訊（授權要求保留署名，散布時不得移除）
+    @objc func showAbout() {
+        let v = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0"
+        let alert = NSAlert()
+        alert.messageText = "動態壁紙 DynWall \(v)"
+        alert.informativeText = """
+        作者：shimianyizhimiao
+        授權：PolyForm Noncommercial 1.0.0 + Share-Alike 附加條款
+        　　　（禁止商業使用；修改後散布必須以相同條款開源，不得閉源）
+
+        原始碼：https://github.com/shimianyizhimiao/dynwall
+
+        本程式為個人自製專案，免費提供。若你是從付費管道拿到這支程式，
+        那不是作者發布的版本。
+        """
+        alert.addButton(withTitle: "好")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     // MARK: 選單動作
