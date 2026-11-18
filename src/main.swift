@@ -978,6 +978,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if CommandLine.arguments.contains("--tour-test") {
             runTourTest()
         }
+        if CommandLine.arguments.contains("--snap-test") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                guard let w = self.libraryWindow, let v = w.contentView,
+                      let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+                v.cacheDisplay(in: v.bounds, to: rep)
+                if let data = rep.representation(using: .png, properties: [:]) {
+                    try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
+                    say("SNAPTEST bytes=\(data.count) px=\(rep.pixelsWide)x\(rep.pixelsHigh)")
+                }
+            }
+        }
         if CommandLine.arguments.contains("--settings-test") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                 self.showSettingsWindow()
@@ -1800,6 +1811,8 @@ extension AppDelegate {
                              backing: .buffered, defer: false)
             w.title = "動態壁紙庫"
             w.isReleasedWhenClosed = false
+            w.isOpaque = false                     // 玻璃質感：讓背景用材質透出桌面
+            w.backgroundColor = .clear
             w.delegate = self
             w.contentView = NSHostingView(rootView: LibraryView(model: libraryModel))
             w.center()

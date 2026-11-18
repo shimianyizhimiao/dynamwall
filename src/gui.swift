@@ -517,10 +517,10 @@ struct ItemCard: View {
                     ProgressView().controlSize(.small)
                 }
             }
-            .frame(height: 108)
+            .frame(height: 118)
             .clipped()
-            .cornerRadius(8)
-            .overlay(RoundedRectangle(cornerRadius: 8)
+            .cornerRadius(10)
+            .overlay(RoundedRectangle(cornerRadius: 10)
                 .stroke(current ? Color.accentColor : (selected ? Color.secondary : Color.clear), lineWidth: current ? 3 : 1.5))
             .overlay(alignment: .topLeading) {
                 if let b = kindBadge {
@@ -546,7 +546,7 @@ struct ItemCard: View {
             }
             .overlay(alignment: .bottom) {
                 if hover && !current {
-                    Text("雙擊套用")
+                    Text("設為桌布")
                         .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(.black.opacity(0.6))
@@ -559,10 +559,16 @@ struct ItemCard: View {
             Text(item.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
             Text(item.subtitle).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
         }
-        .padding(6)
-        .background(selected ? Color.primary.opacity(0.08) : (hover ? Color.primary.opacity(0.04) : Color.clear))
-        .cornerRadius(10)
-        .scaleEffect(hover ? 1.02 : 1.0)
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 14)
+                    .stroke(selected ? Color.accentColor.opacity(0.85) : Color.white.opacity(0.12), lineWidth: 1))
+        )
+        .cornerRadius(14)
+        .shadow(color: .black.opacity(hover ? 0.35 : 0.18), radius: hover ? 14 : 6, y: hover ? 6 : 3)
+        .scaleEffect(hover ? 1.03 : 1.0)
         .animation(.easeOut(duration: 0.12), value: hover)
         .contentShape(Rectangle())
         .onHover { hover = $0 }
@@ -597,6 +603,7 @@ struct LibraryView: View {
                 inspector.frame(width: 320)
             }
             .frame(minWidth: 1000, minHeight: 640)
+            .background(.regularMaterial)
 
             if tour.active {
                 TourOverlay(tour: tour)
@@ -614,8 +621,114 @@ struct LibraryView: View {
         }
     }
 
+    /// 開頭的大圖：目前選取的那張放大成 banner
+    private var hero: some View {
+        ZStack(alignment: .bottomLeading) {
+            Group {
+                if let t = model.selected?.thumb {
+                    Image(nsImage: t).resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    LinearGradient(colors: [Color(red: 0.10, green: 0.12, blue: 0.22),
+                                            Color(red: 0.30, green: 0.14, blue: 0.38)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+
+            LinearGradient(colors: [.black.opacity(0.88), .black.opacity(0.25), .clear],
+                           startPoint: .bottom, endPoint: .center)
+
+            HStack(alignment: .bottom, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        if let s = model.selected, model.isCurrent(s) {
+                            Text("使用中")
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.accentColor)
+                                .foregroundColor(.white)
+                                .cornerRadius(4)
+                        }
+                        Text(selectedKindLabel)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.65))
+                    }
+                    Text(model.selected?.title ?? "選一張壁紙開始")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Text(model.selected?.subtitle ?? "點左邊任何一張，這裡會放大成這樣")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.72))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Button {
+                    model.applySelected()
+                } label: {
+                    Label("套用到桌面", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(model.selected == nil || (model.selected.map { model.isCurrent($0) } ?? true))
+            }
+            .padding(18)
+        }
+        .frame(height: 200)
+        .cornerRadius(14)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.08)))
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
+    }
+
+    private var selectedKindLabel: String {
+        guard let s = model.selected else { return "" }
+        switch s.kind {
+        case "video": return "影片"
+        case "image": return s.ref.lowercased().hasSuffix(".gif") ? "GIF" : "圖片"
+        case "web": return "HTML 動態"
+        default: return "內建動態壁紙"
+        }
+    }
+
+    private func sectionTitle(_ t: String, _ n: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(t).font(.system(size: 13, weight: .bold))
+            Text("\(n)")
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(Color.primary.opacity(0.08))
+                .cornerRadius(5)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
+    private func wallGrid(_ items: [WallpaperItem]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 16)], spacing: 16) {
+            ForEach(items) { it in
+                ItemCard(item: it,
+                         current: model.isCurrent(it),
+                         selected: model.selectedID == it.id,
+                         onTap: { model.selectedID = it.id },
+                         onApply: { model.apply(it) },
+                         onReveal: { model.reveal(it) },
+                         onEdit: it.kind == "web" ? { model.editHTML(it) } : nil,
+                         onDelete: it.canDelete ? { model.delete(it) } : nil)
+            }
+        }
+        .padding(.horizontal, 12)
+    }
+
     private var libraryPane: some View {
         VStack(spacing: 0) {
+            hero
             VStack(spacing: 8) {
                 // 第一列：類型切換（讓它用自然寬度，不要硬塞固定寬度被裁掉）
                 HStack(spacing: 10) {
@@ -676,19 +789,24 @@ struct LibraryView: View {
             Divider()
 
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 14)], spacing: 14) {
-                    ForEach(model.filtered) { it in
-                        ItemCard(item: it,
-                                 current: model.isCurrent(it),
-                                 selected: model.selectedID == it.id,
-                                 onTap: { model.selectedID = it.id },
-                                 onApply: { model.apply(it) },
-                                 onReveal: { model.reveal(it) },
-                                 onEdit: it.kind == "web" ? { model.editHTML(it) } : nil,
-                                 onDelete: it.canDelete ? { model.delete(it) } : nil)
+                VStack(alignment: .leading, spacing: 10) {
+                    if model.filter == "全部" && model.search.isEmpty {
+                        let builtins = model.filtered.filter { $0.kind == "builtin" }
+                        let mine = model.filtered.filter { $0.kind != "builtin" }
+                        if !builtins.isEmpty {
+                            sectionTitle("內建精選", builtins.count)
+                            wallGrid(builtins)
+                        }
+                        if !mine.isEmpty {
+                            sectionTitle("我的壁紙", mine.count)
+                            wallGrid(mine)
+                        }
+                    } else {
+                        wallGrid(model.filtered)
                     }
                 }
-                .padding(14)
+                .padding(.top, 4)
+                .padding(.bottom, 14)
             }
             .tourAnchor("grid")
 
