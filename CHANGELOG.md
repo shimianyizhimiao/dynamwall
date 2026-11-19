@@ -1,5 +1,14 @@
 # 更新紀錄
 
+## v0.9.4
+
+### 修：鎖定畫面一直停在舊的「極光」
+
+- 原因：macOS 把「桌面」和「鎖定畫面／螢幕保護（Idle）」分開存。App 之前只設了桌面那張，Idle 還是以前 `iwallpaper` 留下的舊圖 → 打密碼時看到極光
+- 現在套用壁紙後會把每個螢幕的 Idle 一起設成同一張（寫入 `~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`，**先備份**，設定裡有「還原系統桌布設定」）
+- 寫入後**不重啟 WallpaperAgent**（重啟會用記憶體裡的舊狀態蓋回去）
+- 動態鎖屏：改成讀系統「動態桌布」的 assetID，把影片寫進 `aerials/videos/<assetID>.mov`；有開這個功能時不再用靜態海報蓋掉桌布
+
 ## v0.9.3
 
 ### 鎖定畫面動態：從「兩個按鈕」變成「一個開關」

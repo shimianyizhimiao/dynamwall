@@ -446,6 +446,7 @@ final class ScreenWallpaper {
         if c.paused { pauseContent() }
         schedulePosterRefresh()
         if cfg.lockVideoOn { (NSApp.delegate as? AppDelegate)?.syncLockVideo() }
+        else { (NSApp.delegate as? AppDelegate)?.scheduleLockSync() }
     }
 
     func teardownContent() {
@@ -542,6 +543,8 @@ final class ScreenWallpaper {
 
     /// 產生這台螢幕的靜態海報，並設成系統桌布
     func writeDesktopPoster(_ done: (() -> Void)? = nil, force: Bool = false) {
+        // 鎖定畫面要播影片時，桌布必須保持是系統的「動態桌布」，不能被靜態海報蓋掉
+        if cfg.lockVideoOn && cfg.kind == "video" { say("POSTER-SKIP lockVideoOn"); done?(); return }
         // 桌面上已經是這張壁紙的海報（比例也對）→ 連產生都不用，直接跳過
         // 每次啟動都重畫一張 2.6MB 的 PNG 很浪費，也容易讓桌布閃一下
         let preHash = shortHash(cfg.kind + "|" + cfg.ref)
@@ -977,6 +980,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var pausedByFullscreen = false
     var headless = false   // 測試模式：不要彈 NSAlert 卡住主執行緒
     var lockVideoWaiting = false
+    var lockSyncWork: DispatchWorkItem?
     var lockVideoProgress = ""
     /// 啟動前每台螢幕原本的桌布，供「關掉 App 後保留桌面」關閉時還原
     var originalDesktop: [CGDirectDisplayID: URL] = [:]
@@ -2171,6 +2175,127 @@ extension AppDelegate {
         }
     }
 
+    // MARK: 鎖定畫面的圖示設定（macOS 把「鎖定畫面／螢幕保護」存在 Idle，跟桌布分開）
+
+    func wallpaperStoreURL() -> URL {
+        fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.apple.wallpaper/Store/Index.plist")
+    }
+
+    /// 讀出整份桌布設定（失敗回 nil）
+    func readWallpaperStore() -> [String: Any]? {
+        guard let data = try? Data(contentsOf: wallpaperStoreURL()),
+              let obj = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return nil }
+        return obj
+    }
+
+    func backupWallpaperStore() {
+        let bak = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/動態壁紙/Index.plist.bak")
+        guard !fm.fileExists(atPath: bak.path) else { return }
+        try? fm.copyItem(at: wallpaperStoreURL(), to: bak)
+        say("STORE backup=\(bak.lastPathComponent)")
+    }
+
+    func writeWallpaperStore(_ obj: [String: Any]) -> Bool {
+        guard let data = try? PropertyListSerialization.data(fromPropertyList: obj, format: .binary, options: 0) else { return false }
+        do { try data.write(to: wallpaperStoreURL()); return true } catch { say("STORE write failed \(error)"); return false }
+    }
+
+    func scheduleLockSync() {
+        lockSyncWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in
+            guard let self, !self.cfg.lockVideoOn else { return }
+            self.syncLockToDesktop()
+        }
+        lockSyncWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0, execute: w)
+    }
+
+    /// 把每個螢幕「鎖定畫面（Idle）」設成跟桌面同一張 —— 打密碼時就不會再看到舊圖
+    @discardableResult
+    func syncLockToDesktop() -> Bool {
+        guard var obj = readWallpaperStore() else { say("STORE read failed"); return false }
+        guard var displays = obj["Displays"] as? [String: Any] else { return false }
+        var changed = 0
+        for (id, value) in displays {
+            guard var v = value as? [String: Any],
+                  var desk = v["Desktop"] as? [String: Any],
+                  var idle = v["Idle"] as? [String: Any] else { continue }
+            guard var deskContent = desk["Content"] as? [String: Any],
+                  var idleContent = idle["Content"] as? [String: Any] else { continue }
+            idleContent["Choices"] = deskContent["Choices"]
+            if let opt = deskContent["EncodedOptionValues"] { idleContent["EncodedOptionValues"] = opt }
+            idle["Content"] = idleContent
+            v["Idle"] = idle
+            displays[id] = v
+            changed += 1
+        }
+        guard changed > 0 else { say("STORE 沒有可同步的螢幕"); return false }
+        obj["Displays"] = displays
+        backupWallpaperStore()
+        let ok = writeWallpaperStore(obj)
+        say("STORE idle←desktop screens=\(changed) ok=\(ok)")
+        return ok
+    }
+
+    /// 把系統桌布設定還原成 App 第一次改之前的樣子
+    @objc func restoreWallpaperStore() {
+        let bak = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/動態壁紙/Index.plist.bak")
+        guard fm.fileExists(atPath: bak.path) else { alert("沒有備份", "這個 App 還沒改過系統桌布設定。"); return }
+        do {
+            try? fm.removeItem(at: wallpaperStoreURL())
+            try fm.copyItem(at: bak, to: wallpaperStoreURL())
+            restartWallpaperAgent()
+            say("STORE restored from backup")
+            alert("已還原", "系統桌布設定已還原成 App 改動前的樣子，並重啟 WallpaperAgent。")
+        } catch {
+            alert("還原失敗", "\(error)")
+        }
+    }
+
+    /// 找出系統裡現成的「動態桌布」選項，回傳它的 assetID（給鎖定畫面用）
+    func aerialChoice() -> (choice: [String: Any], assetID: String)? {
+        guard let obj = readWallpaperStore(), let displays = obj["Displays"] as? [String: Any] else { return nil }
+        for (_, value) in displays {
+            guard let v = value as? [String: Any] else { continue }
+            for kind in ["Idle", "Desktop"] {
+                guard let k = v[kind] as? [String: Any],
+                      let content = k["Content"] as? [String: Any],
+                      let choices = content["Choices"] as? [[String: Any]] else { continue }
+                for c in choices {
+                    guard let provider = c["Provider"] as? String, provider.contains("aerial"),
+                          let conf = c["Configuration"] as? Data,
+                          let inner = try? PropertyListSerialization.propertyList(from: conf, format: nil) as? [String: Any],
+                          let asset = inner["assetID"] as? String else { continue }
+                    return (c, asset)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// 把鎖定畫面設成那張動態桌布（影片檔由我們寫進去）
+    @discardableResult
+    func useAerialForLock() -> String? {
+        guard let (choice, asset) = aerialChoice() else { say("STORE 沒有 aerial 選項"); return nil }
+        guard var obj = readWallpaperStore(), var displays = obj["Displays"] as? [String: Any] else { return nil }
+        for (id, value) in displays {
+            guard var v = value as? [String: Any], var idle = v["Idle"] as? [String: Any],
+                  var content = idle["Content"] as? [String: Any] else { continue }
+            content["Choices"] = [choice]
+            idle["Content"] = content
+            v["Idle"] = idle
+            displays[id] = v
+        }
+        obj["Displays"] = displays
+        backupWallpaperStore()
+        let ok = writeWallpaperStore(obj)
+        say("STORE idle←aerial asset=\(asset) ok=\(ok)")
+        return ok ? asset : nil
+    }
+
     // MARK: 鎖定影片：自動同步（勾一次就好）
 
     func lockVideoCacheDir() -> URL {
@@ -2185,45 +2310,42 @@ extension AppDelegate {
         return lockVideoCacheDir().appendingPathComponent("lock-\(h).mov")
     }
 
-    /// 勾了「鎖定畫面同步」就自動做：轉一次、快取起來，之後換壁紙只複製檔案
+    /// 勾了「鎖定畫面同步」就自動做：把鎖定畫面設成系統那張動態桌布，並把影片換成我們的
     func syncLockVideo() {
         guard cfg.lockVideoOn else { say("LOCKVIDEO off"); return }
-        guard cfg.kind == "video" else { say("LOCKVIDEO skip kind=\(cfg.kind)"); return }
-        let slots = aerialSlots()
-        guard !slots.isEmpty else {
-            say("LOCKVIDEO 等系統動態桌布槽")
+        guard cfg.kind == "video" else { say("LOCKVIDEO skip kind=\(cfg.kind)"); lockVideoProgress = "只支援影片壁紙"; return }
+        guard let asset = useAerialForLock() else {
+            say("LOCKVIDEO 系統裡沒有動態桌布可選")
             if !lockVideoWaiting {
                 lockVideoWaiting = true
-                alert("先下載一個系統動態桌布（只需一次）",
-                      "鎖定畫面的影片是「取代 Apple 已經下載好的那支」。\n\n按下面的「開啟桌布設定」，隨便選一個會動的桌布，等它下載完，這個視窗會自動繼續，不用再按任何東西。")
+                lockVideoProgress = "等你在桌布設定選一個「動態」"
+                alert("先在「桌布」選一個動態的",
+                      "鎖定畫面用的那張圖在系統設定 → 桌布裡要選「動態（Aerial）」那一類，而且要是**桌布**不是只有螢幕保護程式。\n\n我已經幫你打開設定頁了：選一個會動的，選好之後這個視窗會自己繼續，不用再按任何東西。")
                 openWallpaperSettings()
                 pollAerialSlots()
             }
             return
         }
-        let target = slots.max { a, b in
-            ((try? a.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) <
-            ((try? b.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        } ?? slots[0]
-        let bak = aerialBackupDir().appendingPathComponent(target.lastPathComponent)
-        if !fm.fileExists(atPath: bak.path) {
-            do { try fm.copyItem(at: target, to: bak); say("AERIAL backup=\(bak.lastPathComponent)") }
-            catch { say("AERIAL backup failed \(error)"); return }
+        let target = aerialDir().appendingPathComponent("\(asset).mov")
+        let bak = aerialBackupDir().appendingPathComponent("\(asset).mov")
+        if fm.fileExists(atPath: target.path), !fm.fileExists(atPath: bak.path) {
+            try? fm.copyItem(at: target, to: bak)
+            say("AERIAL backup=\(asset).mov")
         }
         let cached = lockVideoCacheURL()
         if fm.fileExists(atPath: cached.path) {
-            // 直接複製快取（秒完成）
             do {
                 try? fm.removeItem(at: target)
                 try fm.copyItem(at: cached, to: target)
                 restartWallpaperAgent()
-                say("LOCKVIDEO synced fromCache=true slot=\(target.lastPathComponent)")
+                lockVideoProgress = "已同步"
+                say("LOCKVIDEO synced fromCache=true asset=\(asset)")
                 return
             } catch { say("LOCKVIDEO copy failed \(error)") }
         }
         let src = URL(fileURLWithPath: resolveRef(cfg.ref))
-        say("LOCKVIDEO converting src=\(src.lastPathComponent)")
-        lockVideoProgress = "轉檔中…"
+        say("LOCKVIDEO converting src=\(src.lastPathComponent) asset=\(asset)")
+        lockVideoProgress = "轉檔中…（約 20 秒）"
         let tmp = fm.temporaryDirectory.appendingPathComponent("lock-\(UUID().uuidString).mov")
         transcodeToHEVC(src, tmp) { ok, err in
             guard ok else {
@@ -2237,7 +2359,7 @@ extension AppDelegate {
             try? fm.copyItem(at: cached, to: target)
             self.restartWallpaperAgent()
             self.lockVideoProgress = "已同步"
-            say("LOCKVIDEO synced slot=\(target.lastPathComponent) size=\(((try? cached.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) / 1_048_576)MB")
+            say("LOCKVIDEO synced asset=\(asset) size=\(((try? cached.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) / 1_048_576)MB")
         }
     }
 
@@ -2245,7 +2367,7 @@ extension AppDelegate {
     func pollAerialSlots(_ left: Int = 45) {
         guard cfg.lockVideoOn, left > 0 else { lockVideoWaiting = false; return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-            if !self.aerialSlots().isEmpty {
+            if self.aerialChoice() != nil {
                 self.lockVideoWaiting = false
                 say("LOCKVIDEO 槽出現了，自動開始同步")
                 self.syncLockVideo()

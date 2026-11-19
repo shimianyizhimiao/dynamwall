@@ -204,6 +204,9 @@ struct SettingsView: View {
                     Button("還原 Apple 影片") {
                         NSApp.sendAction(#selector(AppDelegate.restoreAerial), to: nil, from: nil)
                     }
+                    Button("還原系統桌布設定") {
+                        NSApp.sendAction(#selector(AppDelegate.restoreWallpaperStore), to: nil, from: nil)
+                    }
                 }
                 .font(.system(size: 11))
                 Text("第一次需要系統裡有一個「動態桌布」可以取代：按「開啟桌布設定」選一個會動的，等它下載完，App 會自己接續，不用再按任何東西。只有影片壁紙支援。")
