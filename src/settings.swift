@@ -188,22 +188,28 @@ struct SettingsView: View {
             } header: { Text("自動化（省電）") }
 
             Section {
-                Text("macOS 的鎖定畫面只會播 Apple 的「動態桌布」影片。這個功能會把目前這支影片轉成 HEVC，替換掉其中一支已下載的動態桌布，鎖定畫面就會播你的影片。")
-                    .font(.system(size: 11)).foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                toggleRow("鎖定畫面跟桌面一起動態",
+                          "勾一次就好：之後每次換壁紙，App 會自動把同一支影片同步到鎖定畫面（第一次要轉檔，約 20 秒；之後秒完成）。",
+                          Binding(get: { cfg.lockVideoOn },
+                                  set: { cfg.lockVideoOn = $0; Engine.shared.setLockVideo($0); reload() }))
                 HStack(spacing: 10) {
-                    Button("把目前壁紙套到鎖定畫面") {
-                        NSApp.sendAction(#selector(AppDelegate.applyLockVideo), to: nil, from: nil)
+                    if !Engine.shared.lockVideoProgress.isEmpty {
+                        Text(Engine.shared.lockVideoProgress)
+                            .font(.system(size: 11)).foregroundColor(.secondary)
                     }
-                    .disabled(cfg.kind != "video")
-                    Button("還原鎖定畫面影片") {
+                    Spacer()
+                    Button("開啟桌布設定") {
+                        NSApp.sendAction(#selector(AppDelegate.openWallpaperSettings), to: nil, from: nil)
+                    }
+                    Button("還原 Apple 影片") {
                         NSApp.sendAction(#selector(AppDelegate.restoreAerial), to: nil, from: nil)
                     }
                 }
-                .font(.system(size: 12))
-                Text("前提：系統設定 → 桌布 要先選一個「動態」桌布並等下載完。")
+                .font(.system(size: 11))
+                Text("第一次需要系統裡有一個「動態桌布」可以取代：按「開啟桌布設定」選一個會動的，等它下載完，App 會自己接續，不用再按任何東西。只有影片壁紙支援。")
                     .font(.system(size: 10.5)).foregroundColor(.secondary)
-            } header: { Text("鎖定畫面動態（實驗）") }
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: { Text("鎖定畫面（一鍵）") }
         }
         .formStyle(.grouped)
     }

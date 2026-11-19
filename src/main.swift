@@ -87,11 +87,12 @@ struct Config: Codable {
     var rotationMinutes = 30.0
     var pauseOnFullscreen = true   // 有 App 全螢幕時暫停壁紙，省電
     var lockPoster = true          // 鎖定／登入畫面要看到當下這一格（系統桌布一定得是靜態圖）
+    var lockVideoOn = false        // 鎖定畫面跟著桌面一起播同一支影片（自動同步）
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case kind, ref, mute, rate, gravity, dim, interactive, paused, autoStart, poster, parallaxOn, parallax, rotationOn, rotationMinutes, pauseOnFullscreen, lockPoster
+        case kind, ref, mute, rate, gravity, dim, interactive, paused, autoStart, poster, parallaxOn, parallax, rotationOn, rotationMinutes, pauseOnFullscreen, lockPoster, lockVideoOn
     }
 
     init(from decoder: Decoder) throws {
@@ -112,6 +113,7 @@ struct Config: Codable {
         rotationMinutes = (try? c.decode(Double.self, forKey: .rotationMinutes)) ?? 30.0
         pauseOnFullscreen = (try? c.decode(Bool.self, forKey: .pauseOnFullscreen)) ?? true
         lockPoster = (try? c.decode(Bool.self, forKey: .lockPoster)) ?? true
+        lockVideoOn = (try? c.decode(Bool.self, forKey: .lockVideoOn)) ?? false
     }
 }
 
@@ -443,6 +445,7 @@ final class ScreenWallpaper {
         window.ignoresMouseEvents = !allowMouse
         if c.paused { pauseContent() }
         schedulePosterRefresh()
+        if cfg.lockVideoOn { (NSApp.delegate as? AppDelegate)?.syncLockVideo() }
     }
 
     func teardownContent() {
@@ -973,6 +976,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var rotationTimer: Timer?
     var pausedByFullscreen = false
     var headless = false   // 測試模式：不要彈 NSAlert 卡住主執行緒
+    var lockVideoWaiting = false
+    var lockVideoProgress = ""
     /// 啟動前每台螢幕原本的桌布，供「關掉 App 後保留桌面」關閉時還原
     var originalDesktop: [CGDirectDisplayID: URL] = [:]
     var lastParallaxLog = Date.distantPast
@@ -2164,6 +2169,105 @@ extension AppDelegate {
                 }
             }
         }
+    }
+
+    // MARK: 鎖定影片：自動同步（勾一次就好）
+
+    func lockVideoCacheDir() -> URL {
+        let d = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/動態壁紙/lockvideo", isDirectory: true)
+        try? fm.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+
+    func lockVideoCacheURL() -> URL {
+        let h = shortHash(cfg.kind + "|" + cfg.ref + "|" + String(describing: (try? fm.attributesOfItem(atPath: resolveRef(cfg.ref))[.size]) ?? ""))
+        return lockVideoCacheDir().appendingPathComponent("lock-\(h).mov")
+    }
+
+    /// 勾了「鎖定畫面同步」就自動做：轉一次、快取起來，之後換壁紙只複製檔案
+    func syncLockVideo() {
+        guard cfg.lockVideoOn else { say("LOCKVIDEO off"); return }
+        guard cfg.kind == "video" else { say("LOCKVIDEO skip kind=\(cfg.kind)"); return }
+        let slots = aerialSlots()
+        guard !slots.isEmpty else {
+            say("LOCKVIDEO 等系統動態桌布槽")
+            if !lockVideoWaiting {
+                lockVideoWaiting = true
+                alert("先下載一個系統動態桌布（只需一次）",
+                      "鎖定畫面的影片是「取代 Apple 已經下載好的那支」。\n\n按下面的「開啟桌布設定」，隨便選一個會動的桌布，等它下載完，這個視窗會自動繼續，不用再按任何東西。")
+                openWallpaperSettings()
+                pollAerialSlots()
+            }
+            return
+        }
+        let target = slots.max { a, b in
+            ((try? a.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) <
+            ((try? b.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        } ?? slots[0]
+        let bak = aerialBackupDir().appendingPathComponent(target.lastPathComponent)
+        if !fm.fileExists(atPath: bak.path) {
+            do { try fm.copyItem(at: target, to: bak); say("AERIAL backup=\(bak.lastPathComponent)") }
+            catch { say("AERIAL backup failed \(error)"); return }
+        }
+        let cached = lockVideoCacheURL()
+        if fm.fileExists(atPath: cached.path) {
+            // 直接複製快取（秒完成）
+            do {
+                try? fm.removeItem(at: target)
+                try fm.copyItem(at: cached, to: target)
+                restartWallpaperAgent()
+                say("LOCKVIDEO synced fromCache=true slot=\(target.lastPathComponent)")
+                return
+            } catch { say("LOCKVIDEO copy failed \(error)") }
+        }
+        let src = URL(fileURLWithPath: resolveRef(cfg.ref))
+        say("LOCKVIDEO converting src=\(src.lastPathComponent)")
+        lockVideoProgress = "轉檔中…"
+        let tmp = fm.temporaryDirectory.appendingPathComponent("lock-\(UUID().uuidString).mov")
+        transcodeToHEVC(src, tmp) { ok, err in
+            guard ok else {
+                say("LOCKVIDEO convert failed \(err ?? "")")
+                self.lockVideoProgress = "轉檔失敗"
+                return
+            }
+            try? fm.removeItem(at: cached)
+            try? fm.copyItem(at: tmp, to: cached)
+            try? fm.removeItem(at: target)
+            try? fm.copyItem(at: cached, to: target)
+            self.restartWallpaperAgent()
+            self.lockVideoProgress = "已同步"
+            say("LOCKVIDEO synced slot=\(target.lastPathComponent) size=\(((try? cached.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) / 1_048_576)MB")
+        }
+    }
+
+    /// 等使用者去系統設定下載動態桌布：每 4 秒看一次，最多 3 分鐘
+    func pollAerialSlots(_ left: Int = 45) {
+        guard cfg.lockVideoOn, left > 0 else { lockVideoWaiting = false; return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            if !self.aerialSlots().isEmpty {
+                self.lockVideoWaiting = false
+                say("LOCKVIDEO 槽出現了，自動開始同步")
+                self.syncLockVideo()
+            } else {
+                self.pollAerialSlots(left - 1)
+            }
+        }
+    }
+
+    @objc func openWallpaperSettings() {
+        let urls = ["x-apple.systempreferences:com.apple.Wallpaper-Settings.extension",
+                    "x-apple.systempreferences:com.apple.Desktop-Settings.extension"]
+        for u in urls {
+            if let url = URL(string: u), NSWorkspace.shared.open(url) { say("LOCKVIDEO open wallpaper pane"); return }
+        }
+    }
+
+    func guiSetLockVideo(_ on: Bool) {
+        cfg.lockVideoOn = on
+        saveConfig(cfg)
+        lockVideoProgress = on ? "準備中…" : ""
+        if on { syncLockVideo() }
     }
 
     @objc func applyLockVideo() {

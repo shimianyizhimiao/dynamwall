@@ -294,7 +294,7 @@ final class SnapshotJob: NSObject, WKNavigationDelegate {
 
 // MARK: ───────────────────────── 與壁紙引擎的橋樑
 
-final class Engine {
+final class Engine: ObservableObject {
     static let shared = Engine()
     weak var app: AppDelegate?
     var config: Config { app?.cfg ?? Config() }
@@ -311,6 +311,8 @@ final class Engine {
     func setRotation(_ on: Bool, _ minutes: Double) { app?.guiSetRotation(on, minutes) }
     func setPauseOnFullscreen(_ on: Bool) { app?.guiSetPauseOnFullscreen(on) }
     func setLockPoster(_ on: Bool) { app?.guiSetLockPoster(on) }
+    func setLockVideo(_ on: Bool) { app?.guiSetLockVideo(on) }
+    var lockVideoProgress: String { app?.lockVideoProgress ?? "" }
 }
 
 // MARK: ───────────────────────── 資料模型
