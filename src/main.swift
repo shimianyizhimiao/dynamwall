@@ -972,6 +972,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var parallaxTimer: Timer?
     var rotationTimer: Timer?
     var pausedByFullscreen = false
+    var headless = false   // 測試模式：不要彈 NSAlert 卡住主執行緒
     /// 啟動前每台螢幕原本的桌布，供「關掉 App 後保留桌面」關閉時還原
     var originalDesktop: [CGDirectDisplayID: URL] = [:]
     var lastParallaxLog = Date.distantPast
@@ -1044,6 +1045,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 say("WE-IMPORT result=\(ok)")
                 self.libraryModel.refresh()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { NSApp.terminate(nil) }
+            }
+        }
+        if CommandLine.arguments.contains("--lock-apply") || CommandLine.arguments.contains("--lock-restore") {
+            headless = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if CommandLine.arguments.contains("--lock-restore") {
+                    self.restoreAerial()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { NSApp.terminate(nil) }
+                } else {
+                    self.applyLockVideo()
+                    // 轉檔是非同步的，最多等 5 分鐘才自己結束
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 300) { NSApp.terminate(nil) }
+                }
             }
         }
         if CommandLine.arguments.contains("--quit-test") {
@@ -1408,6 +1422,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(action("選擇 HTML 網頁檔…", #selector(pickHTML)))
         menu.addItem(action("選擇圖片 / GIF…", #selector(pickImage)))
         menu.addItem(action("匯入 Wallpaper Engine 網頁壁紙…", #selector(importWEAction)))
+        menu.addItem(action("把目前影片套到鎖定畫面", #selector(applyLockVideo)))
+        menu.addItem(action("還原鎖定畫面影片", #selector(restoreAerial)))
 
         let builtinItem = NSMenuItem(title: "內建動態壁紙", action: nil, keyEquivalent: "")
         let bm = NSMenu()
@@ -2050,6 +2066,163 @@ extension AppDelegate {
             NSApp.setActivationPolicy(.accessory)
             say("LIBRARY-CLOSE")
         }
+    }
+
+    // MARK: 鎖定畫面動態（macOS 26 的 aerial 影片槽）
+
+    /// macOS 26 把「鎖定畫面播放的影片」放在這裡；換掉裡面的 .mov，鎖定畫面就會播我們的影片
+    func aerialDir() -> URL {
+        fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.apple.wallpaper/aerials/videos", isDirectory: true)
+    }
+
+    func aerialSlots() -> [URL] {
+        let files = (try? fm.contentsOfDirectory(at: aerialDir(), includingPropertiesForKeys: [.fileSizeKey])) ?? []
+        return files.filter { $0.pathExtension.lowercased() == "mov" }
+    }
+
+    func aerialBackupDir() -> URL {
+        let d = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/動態壁紙/aerial-backup", isDirectory: true)
+        try? fm.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+
+    /// 把目前壁紙的影片轉成 HEVC .mov，換進 aerial 槽；原檔會先備份
+    /// HEVC 轉檔（鎖定畫面只吃 HEVC 的 .mov；AVAssetExportSession 在 4K60 會偷偷輸出 H.264）
+    func transcodeToHEVC(_ src: URL, _ dst: URL, done: @escaping (Bool, String?) -> Void) {
+        let asset = AVURLAsset(url: src)
+        guard let track = asset.tracks(withMediaType: .video).first else { done(false, "沒有影像軌"); return }
+        let t = track.preferredTransform
+        let sz = track.naturalSize.applying(t)
+        let w = Int(abs(sz.width).rounded()), h = Int(abs(sz.height).rounded())
+        guard let reader = try? AVAssetReader(asset: asset) else { done(false, "開不了影片"); return }
+        let pix: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: pix)
+        output.alwaysCopiesSampleData = false
+        reader.add(output)
+        try? fm.removeItem(at: dst)
+        guard let writer = try? AVAssetWriter(outputURL: dst, fileType: .mov) else { done(false, "建不了輸出檔"); return }
+        let bitrate = max(16_000_000, w * h * 20 / 100)   // 4K 約 16–20 Mbps，鎖定畫面看起來才不會糊
+        let settings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.hevc,
+            AVVideoWidthKey: w,
+            AVVideoHeightKey: h,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: bitrate,
+                AVVideoMaxKeyFrameIntervalKey: 60,
+                AVVideoAllowFrameReorderingKey: true,
+            ],
+        ]
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
+        input.expectsMediaDataInRealTime = false
+        input.transform = t
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: pix)
+        guard writer.canAdd(input) else { done(false, "writer 不收這個設定"); return }
+        writer.add(input)
+        guard writer.startWriting(), reader.startReading() else { done(false, "啟動失敗"); return }
+        writer.startSession(atSourceTime: .zero)
+        let q = DispatchQueue(label: "dynwall.hevc")
+        var finished = false
+        input.requestMediaDataWhenReady(on: q) {
+            while input.isReadyForMoreMediaData {
+                guard !finished else { return }
+                if let sb = output.copyNextSampleBuffer() {
+                    if let pb = CMSampleBufferGetImageBuffer(sb) {
+                        adaptor.append(pb, withPresentationTime: CMSampleBufferGetPresentationTimeStamp(sb))
+                    }
+                } else {
+                    finished = true
+                    input.markAsFinished()
+                    reader.cancelReading()
+                    writer.finishWriting {
+                        let ok = writer.status == .completed
+                        done(ok, ok ? nil : writer.error?.localizedDescription)
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    @objc func applyLockVideo() {
+        guard cfg.kind == "video" else {
+            alert("只有「影片」壁紙能放到鎖定畫面",
+                  "macOS 的鎖定畫面只能播影片。先把壁紙換成一支影片再試。")
+            return
+        }
+        let slots = aerialSlots()
+        guard !slots.isEmpty else {
+            alert("還不能設定：系統裡還沒有任何動態桌布",
+                  "鎖定畫面的影片是「取代 Apple 已經下載好的那支」。\n\n請先去 系統設定 → 桌布 → 選一個「動態」桌布（有在動的那種），等它下載完，再回來按一次。\n\n下載位置：~/Library/Application Support/com.apple.wallpaper/aerials/videos/")
+            return
+        }
+        let src = URL(fileURLWithPath: resolveRef(cfg.ref))
+        guard fm.fileExists(atPath: src.path) else { alert("找不到目前的影片檔", src.path); return }
+        // 大檔優先：使用者選的那支動態桌布通常就是最大的槽
+        let target = slots.max { a, b in
+            ((try? a.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) <
+            ((try? b.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        } ?? slots[0]
+        let bak = aerialBackupDir().appendingPathComponent(target.lastPathComponent)
+        if !fm.fileExists(atPath: bak.path) {
+            do { try fm.copyItem(at: target, to: bak); say("AERIAL backup=\(bak.lastPathComponent)") }
+            catch { alert("備份原本的鎖定影片失敗", "\(error)"); return }
+        }
+        say("AERIAL convert src=\(src.lastPathComponent) → slot=\(target.lastPathComponent)")
+        let tmp = fm.temporaryDirectory.appendingPathComponent("lock-\(UUID().uuidString).mov")
+        transcodeToHEVC(src, tmp) { ok, err in
+            guard ok else {
+                say("AERIAL export failed \(err ?? "")")
+                self.alert("轉檔失敗", "無法把這支影片轉成 HEVC：\(err ?? "未知錯誤")")
+                return
+            }
+            do {
+                _ = try fm.replaceItemAt(target, withItemAt: tmp)
+                self.restartWallpaperAgent()
+                let mb = ((try? target.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) / 1_048_576
+                say("AERIAL applied slot=\(target.lastPathComponent) size=\(mb)MB")
+                self.alert("鎖定畫面換好了",
+                           "按 Ctrl+Cmd+Q 鎖定看看。\n\n注意：系統設定裡的桌布要保持是「動態（aerial）」，鎖定畫面才會播這支影片。\n想還原：設定 → 播放 → 還原鎖定畫面影片。")
+            } catch {
+                self.alert("寫入鎖定影片失敗", "\(error)")
+            }
+        }
+    }
+
+    /// 還原 Apple 原本的鎖定畫面影片
+    @objc func restoreAerial() {
+        let slots = aerialSlots()
+        let backups = (try? fm.contentsOfDirectory(at: aerialBackupDir(), includingPropertiesForKeys: nil)) ?? []
+        guard !backups.isEmpty else { alert("沒有備份", "這個 App 沒有換過鎖定畫面影片。"); return }
+        var n = 0
+        for b in backups {
+            let dst = aerialDir().appendingPathComponent(b.lastPathComponent)
+            do {
+                if fm.fileExists(atPath: dst.path) { _ = try fm.replaceItemAt(dst, withItemAt: b) }
+                else { try fm.copyItem(at: b, to: dst) }
+                n += 1
+            } catch { say("AERIAL restore failed \(b.lastPathComponent): \(error)") }
+        }
+        restartWallpaperAgent()
+        say("AERIAL restored n=\(n) slots=\(slots.count)")
+        alert("已還原", "已把 \(n) 支 Apple 原始影片放回去。")
+    }
+
+    func restartWallpaperAgent() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+        p.arguments = ["WallpaperAgent"]
+        try? p.run()
+        say("AERIAL wallpaperAgent restarted")
+    }
+
+    func alert(_ title: String, _ body: String) {
+        if headless { say("ALERT \(title) | \(body.replacingOccurrences(of: "\n", with: " "))"); return }
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = body
+        a.runModal()
     }
 
     // MARK: 定時輪換

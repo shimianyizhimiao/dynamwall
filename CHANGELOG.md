@@ -17,6 +17,9 @@
 
 ### 新功能
 
+- **鎖定畫面動態（實驗）**：把目前影片轉成 HEVC `.mov` 換進 macOS 26 的 aerial 槽（`~/Library/Application Support/com.apple.wallpaper/aerials/videos/`），鎖定畫面播的就是同一支影片；原檔自動備份、可一鍵還原，換完自動重啟 `WallpaperAgent`
+  - 實測：4K60 來源 19 秒轉完，輸出 `hevc (hvc1) 3840x2160 60fps`；還原後 md5 與原檔一致
+
 - **內建精選 9 張 NASA 壁紙**（公有領域）：星雲、地球、極光、星系、月球、火星、海洋、城市夜景、喜馬拉雅
   - `tools/fetch_wallpapers.py` 可重新抓，出處寫在 `resources/wallpapers/static/CREDITS.md`
 - **視差（景深）**：滑鼠移動時壁紙位移 0–30px，內容先放大 9% 所以不會露黑邊（**預設關閉**）

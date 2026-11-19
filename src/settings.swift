@@ -186,6 +186,24 @@ struct SettingsView: View {
                           Binding(get: { cfg.pauseOnFullscreen },
                                   set: { cfg.pauseOnFullscreen = $0; Engine.shared.setPauseOnFullscreen($0); reload() }))
             } header: { Text("自動化（省電）") }
+
+            Section {
+                Text("macOS 的鎖定畫面只會播 Apple 的「動態桌布」影片。這個功能會把目前這支影片轉成 HEVC，替換掉其中一支已下載的動態桌布，鎖定畫面就會播你的影片。")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button("把目前壁紙套到鎖定畫面") {
+                        NSApp.sendAction(#selector(AppDelegate.applyLockVideo), to: nil, from: nil)
+                    }
+                    .disabled(cfg.kind != "video")
+                    Button("還原鎖定畫面影片") {
+                        NSApp.sendAction(#selector(AppDelegate.restoreAerial), to: nil, from: nil)
+                    }
+                }
+                .font(.system(size: 12))
+                Text("前提：系統設定 → 桌布 要先選一個「動態」桌布並等下載完。")
+                    .font(.system(size: 10.5)).foregroundColor(.secondary)
+            } header: { Text("鎖定畫面動態（實驗）") }
         }
         .formStyle(.grouped)
     }
