@@ -312,6 +312,7 @@ final class Engine: ObservableObject {
     func setPauseOnFullscreen(_ on: Bool) { app?.guiSetPauseOnFullscreen(on) }
     func setLockPoster(_ on: Bool) { app?.guiSetLockPoster(on) }
     func setLockVideo(_ on: Bool) { app?.guiSetLockVideo(on) }
+    var lockVideoOn: Bool { app?.cfg.lockVideoOn ?? false }
     var lockVideoProgress: String { app?.lockVideoProgress ?? "" }
 }
 
@@ -321,6 +322,7 @@ final class LibraryModel: ObservableObject {
     @Published var items: [WallpaperItem] = []
     @Published var filter = "全部"
     @Published var search = ""
+    @Published var lockVideoOn = false
     @Published var sort = "名稱"
     @Published var selectedID: String?
 
@@ -875,6 +877,7 @@ struct LibraryView: View {
             DispatchQueue.main.async { tour.rects = r }
         }
         .onAppear {
+            model.lockVideoOn = Engine.shared.lockVideoOn
             model.refresh()
             if model.selectedID == nil { model.selectedID = model.items.first?.id }
             tour.startIfNeeded()
@@ -932,6 +935,24 @@ struct LibraryView: View {
                 .tourAnchor("add")
 
                 Spacer()
+
+                Button {
+                    let on = !model.lockVideoOn
+                    model.lockVideoOn = on
+                    Engine.shared.setLockVideo(on)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: model.lockVideoOn ? "lock.fill" : "lock.open")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(model.lockVideoOn ? "鎖定畫面動態" : "鎖定畫面也動態")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Capsule().fill(model.lockVideoOn ? Color.accentColor.opacity(0.30) : Color.clear))
+                    .overlay(Capsule().stroke(model.lockVideoOn ? Color.accentColor.opacity(0.55) : Color.white.opacity(0.10)))
+                }
+                .buttonStyle(.plain)
+                .help("一鍵：把鎖定畫面換成同一支影片，之後換壁紙自動同步")
 
                 Button { surprise() } label: {
                     Label("猜你喜歡", systemImage: "sparkles")
