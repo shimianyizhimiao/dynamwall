@@ -445,8 +445,6 @@ final class ScreenWallpaper {
         window.ignoresMouseEvents = !allowMouse
         if c.paused { pauseContent() }
         schedulePosterRefresh()
-        if cfg.lockVideoOn { (NSApp.delegate as? AppDelegate)?.syncLockVideo() }
-        else { (NSApp.delegate as? AppDelegate)?.scheduleLockSync() }
     }
 
     func teardownContent() {
@@ -543,8 +541,6 @@ final class ScreenWallpaper {
 
     /// 產生這台螢幕的靜態海報，並設成系統桌布
     func writeDesktopPoster(_ done: (() -> Void)? = nil, force: Bool = false) {
-        // 鎖定畫面要播影片時，桌布必須保持是系統的「動態桌布」，不能被靜態海報蓋掉
-        if cfg.lockVideoOn && cfg.kind == "video" { say("POSTER-SKIP lockVideoOn"); done?(); return }
         // 桌面上已經是這張壁紙的海報（比例也對）→ 連產生都不用，直接跳過
         // 每次啟動都重畫一張 2.6MB 的 PNG 很浪費，也容易讓桌布閃一下
         let preHash = shortHash(cfg.kind + "|" + cfg.ref)

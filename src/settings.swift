@@ -188,31 +188,22 @@ struct SettingsView: View {
             } header: { Text("自動化（省電）") }
 
             Section {
-                toggleRow("鎖定畫面跟桌面一起動態",
-                          "勾一次就好：之後每次換壁紙，App 會自動把同一支影片同步到鎖定畫面（第一次要轉檔，約 20 秒；之後秒完成）。",
-                          Binding(get: { cfg.lockVideoOn },
-                                  set: { cfg.lockVideoOn = $0; Engine.shared.setLockVideo($0); reload() }))
+                Text("macOS 的鎖定畫面由系統進程繪製，第三方 App 改不到 —— 我們試過直接寫系統桌布資料庫（Index.plist）與冒充 Apple 的動態桌布，系統會在幾秒內改回它記憶體裡的設定，所以這個功能拿掉了，不再留半套。")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("要讓鎖定畫面跟桌面一樣，只能在「系統設定 → 桌布」那裡設定（可選同一張給桌面與鎖定畫面）。下方的桌布海報功能仍然有效：桌面上會是壁紙的當下畫面。")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
-                    if !Engine.shared.lockVideoProgress.isEmpty {
-                        Text(Engine.shared.lockVideoProgress)
-                            .font(.system(size: 11)).foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Button("開啟桌布設定") {
+                    Button("打開桌布設定") {
                         NSApp.sendAction(#selector(AppDelegate.openWallpaperSettings), to: nil, from: nil)
-                    }
-                    Button("還原 Apple 影片") {
-                        NSApp.sendAction(#selector(AppDelegate.restoreAerial), to: nil, from: nil)
                     }
                     Button("還原系統桌布設定") {
                         NSApp.sendAction(#selector(AppDelegate.restoreWallpaperStore), to: nil, from: nil)
                     }
                 }
                 .font(.system(size: 11))
-                Text("第一次需要系統裡有一個「動態桌布」可以取代：按「開啟桌布設定」選一個會動的，等它下載完，App 會自己接續，不用再按任何東西。只有影片壁紙支援。")
-                    .font(.system(size: 10.5)).foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } header: { Text("鎖定畫面（一鍵）") }
+            } header: { Text("鎖定畫面（系統限制）") }
         }
         .formStyle(.grouped)
     }
