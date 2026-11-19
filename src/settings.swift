@@ -98,8 +98,10 @@ struct SettingsView: View {
             Section {
                 toggleRow("登入時自動啟動", "開機後在背景直接開始播壁紙，不開視窗。",
                           bind(\.autoStart, { Engine.shared.setAutoStart($0) }))
-                toggleRow("關掉 App 後保留桌面", "結束 App 時把當下畫面存成靜態圖設為桌布，桌面不會變回原本的壁紙。",
+                toggleRow("關掉 App 後保留桌面", "結束 App 時把當下畫面留在桌面。關掉的話，結束時會還原你原本的桌布。",
                           bind(\.poster, { Engine.shared.setPoster($0) }))
+                toggleRow("鎖定畫面顯示當下畫面", "打密碼那個畫面系統只認「桌布圖」，所以一定要有一張靜態圖；關掉就會看到你原本的桌布。",
+                          bind(\.lockPoster, { Engine.shared.setLockPoster($0) }))
             } header: { Text("啟動") }
 
             Section {

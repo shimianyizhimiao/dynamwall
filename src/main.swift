@@ -86,11 +86,12 @@ struct Config: Codable {
     var rotationOn = false    // 定時換壁紙（輪換整個壁紙庫）
     var rotationMinutes = 30.0
     var pauseOnFullscreen = true   // 有 App 全螢幕時暫停壁紙，省電
+    var lockPoster = true          // 鎖定／登入畫面要看到當下這一格（系統桌布一定得是靜態圖）
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case kind, ref, mute, rate, gravity, dim, interactive, paused, autoStart, poster, parallaxOn, parallax, rotationOn, rotationMinutes, pauseOnFullscreen
+        case kind, ref, mute, rate, gravity, dim, interactive, paused, autoStart, poster, parallaxOn, parallax, rotationOn, rotationMinutes, pauseOnFullscreen, lockPoster
     }
 
     init(from decoder: Decoder) throws {
@@ -110,6 +111,7 @@ struct Config: Codable {
         rotationOn = (try? c.decode(Bool.self, forKey: .rotationOn)) ?? false
         rotationMinutes = (try? c.decode(Double.self, forKey: .rotationMinutes)) ?? 30.0
         pauseOnFullscreen = (try? c.decode(Bool.self, forKey: .pauseOnFullscreen)) ?? true
+        lockPoster = (try? c.decode(Bool.self, forKey: .lockPoster)) ?? true
     }
 }
 
@@ -469,7 +471,7 @@ final class ScreenWallpaper {
     /// 套用壁紙後排程產生海報（等動畫／影片跑起來再抓，畫面才漂亮）
     func schedulePosterRefresh() {
         posterWork?.cancel()
-        guard cfg.poster else { return }
+        guard cfg.poster || cfg.lockPoster else { return }
         let w = DispatchWorkItem { [weak self] in self?.writeDesktopPoster() }
         posterWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: w)
@@ -536,11 +538,11 @@ final class ScreenWallpaper {
     }
 
     /// 產生這台螢幕的靜態海報，並設成系統桌布
-    func writeDesktopPoster(_ done: (() -> Void)? = nil) {
+    func writeDesktopPoster(_ done: (() -> Void)? = nil, force: Bool = false) {
         // 桌面上已經是這張壁紙的海報（比例也對）→ 連產生都不用，直接跳過
         // 每次啟動都重畫一張 2.6MB 的 PNG 很浪費，也容易讓桌布閃一下
         let preHash = shortHash(cfg.kind + "|" + cfg.ref)
-        if let cur = NSWorkspace.shared.desktopImageURL(for: screen), fm.fileExists(atPath: cur.path),
+        if !force, let cur = NSWorkspace.shared.desktopImageURL(for: screen), fm.fileExists(atPath: cur.path),
            cur.lastPathComponent.hasPrefix("poster-\(preHash)-"),
            let img = NSImage(contentsOf: cur), let rep = img.representations.first, rep.pixelsHigh > 0,
            abs(Double(rep.pixelsWide) / Double(rep.pixelsHigh) - Double(screen.frame.width / max(screen.frame.height, 1))) < 0.01 {
@@ -556,7 +558,7 @@ final class ScreenWallpaper {
                 // 桌布已經是同一張就不要重設：重設會讓系統桌布重畫一次，很容易被看成「閃一下」
                 // 但「同一來源、比例卻不對」（舊版海報沒裁切）時仍要重設，否則黑邊會留著
                 let h = shortHash(self.cfg.kind + "|" + self.cfg.ref)
-                if let curURL = NSWorkspace.shared.desktopImageURL(for: self.screen) {
+                if !force, let curURL = NSWorkspace.shared.desktopImageURL(for: self.screen) {
                     let cur = curURL.lastPathComponent
                     if cur == url.lastPathComponent || cur.hasPrefix("poster-\(h)-") {
                         let screenAspect = Double(self.screen.frame.width / max(self.screen.frame.height, 1))
@@ -970,6 +972,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var parallaxTimer: Timer?
     var rotationTimer: Timer?
     var pausedByFullscreen = false
+    /// 啟動前每台螢幕原本的桌布，供「關掉 App 後保留桌面」關閉時還原
+    var originalDesktop: [CGDirectDisplayID: URL] = [:]
     var lastParallaxLog = Date.distantPast
     var pausedBySystem = false
     var systemHidden = false
@@ -982,6 +986,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let libraryModel = LibraryModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 先記下使用者原本的桌布：若「關掉 App 後桌面保留同一張」是關的，結束時要還原
+        for sc in NSScreen.screens {
+            if let id = (sc.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value,
+               let u = NSWorkspace.shared.desktopImageURL(for: sc) {
+                originalDesktop[id] = u
+            }
+        }
+        say("ORIGINAL-DESKTOP \(originalDesktop.mapValues { $0.lastPathComponent })")
         NSApp.setActivationPolicy(.accessory)
         Engine.shared.app = self
         ensureDirs()
@@ -1033,6 +1045,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self.libraryModel.refresh()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { NSApp.terminate(nil) }
             }
+        }
+        if CommandLine.arguments.contains("--quit-test") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { NSApp.terminate(nil) }
         }
         if CommandLine.arguments.contains("--ui-test") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
@@ -1128,6 +1143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func applicationWillTerminate(_ notification: Notification) {
         // 關掉 App 前，先把「現在這一格」變成系統桌布 —— 否則桌面會變回原本的壁紙
+        if !cfg.poster {
+            restoreOriginalDesktop()
+        }
         if cfg.poster && !screens.isEmpty {
             // 有現成海報就同步沿用（瞬間完成）；沒有才退回非同步產生，最多等 2 秒
             var needWait = false
@@ -1231,10 +1249,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             else { sw.resumeContent() }
         }
         say("SYSTEM-PAUSE \(pause)")
+        // 要進鎖定／睡眠前，先把「現在這一格」寫成桌布：登入畫面只認桌布圖，不會顯示我們的視窗
+        if pause && (cfg.poster || cfg.lockPoster) {
+            for sw in screens { sw.writeDesktopPoster(nil, force: true) }
+            say("LOCK-POSTER refreshed screens=\(screens.count)")
+        }
         // 醒來／解鎖後，系統有時會把桌布改回舊圖 → 重新套一次我們的定格圖（60 秒內不重複做，避免一直重畫）
-        if !pause && cfg.poster && Date().timeIntervalSince(lastPosterRefreshAt) > 60 {
+        if !pause && (cfg.poster || cfg.lockPoster) && Date().timeIntervalSince(lastPosterRefreshAt) > 60 {
             lastPosterRefreshAt = Date()
             for sw in screens { sw.schedulePosterRefresh() }
+        }
+    }
+
+    /// 把桌布還原成使用者啟動前的樣子（只有「關掉 App 後桌面保留同一張」關閉時才會做）
+    func restoreOriginalDesktop() {
+        for sc in NSScreen.screens {
+            guard let id = (sc.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value,
+                  let u = originalDesktop[id], fm.fileExists(atPath: u.path) else { continue }
+            do {
+                try NSWorkspace.shared.setDesktopImageURL(u, for: sc, options: [
+                    .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
+                    .allowClipping: true,
+                ])
+                say("RESTORE-DESKTOP screen=\(id) file=\(u.lastPathComponent)")
+            } catch {
+                say("RESTORE-DESKTOP 失敗 screen=\(id) \(error)")
+            }
         }
     }
 
@@ -2084,6 +2124,12 @@ extension AppDelegate {
     func resumeAllScreens() {
         guard !cfg.paused, !pausedBySystem else { return }
         for sw in screens { sw.resumeContent() }
+    }
+
+    func guiSetLockPoster(_ on: Bool) {
+        cfg.lockPoster = on
+        saveConfig(cfg)
+        if on { for sw in screens { sw.schedulePosterRefresh() } }
     }
 
     func guiSetPauseOnFullscreen(_ on: Bool) {

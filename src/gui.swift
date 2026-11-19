@@ -286,6 +286,7 @@ final class Engine {
     func setParallax(_ on: Bool, _ amount: Double) { app?.guiSetParallax(on, amount) }
     func setRotation(_ on: Bool, _ minutes: Double) { app?.guiSetRotation(on, minutes) }
     func setPauseOnFullscreen(_ on: Bool) { app?.guiSetPauseOnFullscreen(on) }
+    func setLockPoster(_ on: Bool) { app?.guiSetLockPoster(on) }
 }
 
 // MARK: ───────────────────────── 資料模型
