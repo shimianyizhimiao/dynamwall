@@ -1075,6 +1075,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     m.filter = "全部"; m.search = "NASA"; say("UITEST search=NASA → \(m.filtered.count)")
                     m.search = "zzzz"; say("UITEST search=zzzz → \(m.filtered.count)")
                     m.search = ""
+                    // 最愛：加一張 → 我的頁應該只剩那張 → 取消
+                    if let first = m.items.first {
+                        let before = m.isFav(first.id)
+                        m.toggleFav(first.id)
+                        let favCount = m.favorites.count
+                        let oldPage = m.page; m.page = .mine
+                        say("UITEST fav id=\(first.id) count=\(favCount) minePage=\(m.pageItems.count)")
+                        m.page = oldPage
+                        if m.isFav(first.id) != before { m.toggleFav(first.id) }
+                    }
                     // 存快照：全部 → 搜尋 NASA → 搜尋無結果
                     func snap(_ name: String) {
                         guard let w = self.libraryWindow, let v = w.contentView,
@@ -1113,12 +1123,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             runTourTest()
         }
         if CommandLine.arguments.contains("--snap-test") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            if let i = CommandLine.arguments.firstIndex(of: "--page"), i + 1 < CommandLine.arguments.count {
+                let name = CommandLine.arguments[i + 1]
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    let pages: [String: LibraryModel.Page] = ["首頁": .home, "靜態": .still, "動態": .motion, "我的": .mine]
+                    self.libraryModel.page = pages[name] ?? .home
+                    self.libraryModel.category = name == "靜態" ? "全部" : "全部"
+                    say("SNAPTEST page=\(name) items=\(self.libraryModel.pageItems.count)")
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
                 guard let w = self.libraryWindow, let v = w.contentView,
                       let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
                 v.cacheDisplay(in: v.bounds, to: rep)
                 if let data = rep.representation(using: .png, properties: [:]) {
-                    try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
+                    let pg = self.libraryModel.page.rawValue
+try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap-\(pg).png"))
+try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
                     say("SNAPTEST bytes=\(data.count) px=\(rep.pixelsWide)x\(rep.pixelsHigh)")
                 }
             }

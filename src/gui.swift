@@ -9,10 +9,34 @@ import SwiftUI
 import AVFoundation
 import WebKit
 import UniformTypeIdentifiers
+import ImageIO
 
 // MARK: ───────────────────────── 壁紙項目
 
 final class WallpaperItem: Identifiable, ObservableObject {
+    /// 卡片上顯示的名字：檔名清乾淨（去掉 (1)、底線、副檔名）
+    var displayTitle: String {
+        var t = title
+        if let dot = t.lastIndex(of: "."), t.distance(from: t.startIndex, to: dot) > 3,
+           ["mp4", "mov", "m4v", "png", "jpg", "jpeg", "heic", "gif", "html"].contains(t.suffix(4).lowercased())
+            || ["mp4", "mov", "m4v", "png", "jpg", "jpeg", "heic", "gif", "html"].contains(t.suffix(5).lowercased()) {
+            t = String(t[..<dot])
+        }
+        t = t.replacingOccurrences(of: "_", with: " ")
+        for _ in 0..<3 {
+            t = t.replacingOccurrences(of: #"\s*\(\d+\)$"#, with: "", options: .regularExpression)
+        }
+        t = t.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        t = t.trimmingCharacters(in: .whitespaces)
+        if t.range(of: #"^[0-9]+$"#, options: .regularExpression) != nil {
+            switch kind {
+            case "video": return "影片 \(t)"
+            case "image": return "圖片 \(t)"
+            default: return t
+            }
+        }
+        return t
+    }
     let id: String
     let kind: String            // builtin | video | image | web
     let ref: String
@@ -302,6 +326,54 @@ final class LibraryModel: ObservableObject {
     @Published var cfg = Config()
     @Published var message = ""
     @Published var importing = false
+
+    // 探索頁：分頁 / 分類 / 最愛
+    enum Page: String, CaseIterable, Identifiable {
+        case home = "首頁", still = "靜態", motion = "動態", mine = "我的"
+        var id: String { rawValue }
+    }
+    @Published var page: Page = .home
+    @Published var category: String = "全部"
+    @Published var favorites: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "favIDs") ?? [])
+
+    /// 分類晶片：名稱 / SF Symbol / 顏色
+    let categories: [(String, String, Color)] = [
+        ("全部", "sparkles", Color(red: 0.36, green: 0.52, blue: 1.0)),
+        ("動態", "play.rectangle.fill", Color(red: 0.62, green: 0.42, blue: 1.0)),
+        ("靜態", "photo.fill", Color(red: 0.20, green: 0.72, blue: 0.72)),
+        ("NASA", "globe.americas.fill", Color(red: 0.95, green: 0.55, blue: 0.25)),
+        ("HTML", "chevron.left.forwardslash.chevron.right", Color(red: 0.35, green: 0.75, blue: 0.45)),
+        ("最愛", "heart.fill", Color(red: 0.95, green: 0.35, blue: 0.55)),
+    ]
+
+    let hotWords = ["星雲", "極光", "太空", "雨", "賽博", "城市", "山", "月"]
+
+    func toggleFav(_ id: String) {
+        if favorites.contains(id) { favorites.remove(id) } else { favorites.insert(id) }
+        UserDefaults.standard.set(Array(favorites), forKey: "favIDs")
+    }
+
+    func isFav(_ id: String) -> Bool { favorites.contains(id) }
+
+    /// 目前分頁 + 分類 + 搜尋後的清單
+    var pageItems: [WallpaperItem] {
+        var list = filtered
+        switch page {
+        case .still:  list = list.filter { $0.kind == "image" }
+        case .motion: list = list.filter { $0.kind != "image" }
+        case .mine:   list = list.filter { favorites.contains($0.id) }
+        case .home:   break
+        }
+        switch category {
+        case "動態": list = list.filter { $0.kind != "image" }
+        case "靜態": list = list.filter { $0.kind == "image" }
+        case "NASA": list = list.filter { $0.title.hasPrefix("NASA") }
+        case "HTML": list = list.filter { $0.kind == "web" }
+        case "最愛": list = list.filter { favorites.contains($0.id) }
+        default: break
+        }
+        return list
+    }
 
     let filters = ["全部", "內建", "影片", "圖片", "我的 HTML"]
 
@@ -738,10 +810,11 @@ struct LibraryView: View {
     @State private var heroPaused = false
 
     private let heroTimer = Timer.publish(every: 6.0, on: .main, in: .common).autoconnect()
+    private let gridColumns = [GridItem(.adaptive(minimum: 215), spacing: 14)]
 
     // MARK: 資料
 
-    private var featured: [WallpaperItem] { model.filtered }
+    private var featured: [WallpaperItem] { model.items }
 
     private var heroItem: WallpaperItem? {
         guard !featured.isEmpty else { return nil }
@@ -756,24 +829,42 @@ struct LibraryView: View {
     }
     private var builtins: [WallpaperItem] { model.filtered.filter { $0.kind == "builtin" } }
     private var mine: [WallpaperItem] { model.filtered.filter { $0.kind != "builtin" } }
-
-    /// 有在搜尋或選了分類時，下面就不要硬分三列，直接列「篩選結果」
     private var isFiltering: Bool { !model.search.isEmpty || model.filter != "全部" }
+
+    private var greeting: String {
+        let h = Calendar.current.component(.hour, from: Date())
+        switch h {
+        case 5..<12: return "早安"
+        case 12..<18: return "午安"
+        default: return "晚安"
+        }
+    }
+
+    private var pageTitle: String {
+        switch model.page {
+        case .home: return "探索壁紙庫"
+        case .still: return "靜態壁紙"
+        case .motion: return "動態壁紙"
+        case .mine: return "我的最愛"
+        }
+    }
 
     // MARK: 主體
 
     var body: some View {
         ZStack(alignment: .top) {
-            GeometryReader { g in
-                VStack(spacing: 0) {
-                    // 視窗小的時候 hero 跟著縮，下面的卡片列才看得到
-                    hero.frame(height: min(max(g.size.height * 0.56, 300), 470))
-                    shelves
+            Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                navBar
+                ScrollView {
+                    if model.page == .home {
+                        homeContent
+                    } else {
+                        exploreContent
+                    }
                 }
             }
-            .background(.regularMaterial)
-
-            topBar.padding(.horizontal, 22).padding(.top, 14)
 
             if tour.active { TourOverlay(tour: tour) }
         }
@@ -792,39 +883,122 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: 大圖
+    // MARK: 上方導覽（分頁置中、右邊工具）
+
+    private var navBar: some View {
+        ZStack {
+            HStack(spacing: 2) {
+                ForEach(LibraryModel.Page.allCases) { p in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            model.page = p
+                            if model.page == .home { model.category = "全部" }
+                        }
+                        dbg("UI page=\(p.rawValue) items=\(model.pageItems.count)")
+                    } label: {
+                        Text(p.rawValue)
+                            .font(.system(size: 12.5, weight: model.page == p ? .semibold : .regular))
+                            .foregroundColor(model.page == p ? .primary : .secondary)
+                            .padding(.horizontal, 18).padding(.vertical, 7)
+                            .background(Capsule().fill(model.page == p ? Color.primary.opacity(0.13) : Color.clear))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(Capsule().fill(.ultraThinMaterial))
+            .overlay(Capsule().stroke(Color.white.opacity(0.10)))
+
+            HStack(spacing: 8) {
+                Menu {
+                    Button("加入檔案…（影片 / 圖片 / GIF / HTML）") { model.pickFiles() }
+                    Button("匯入 Wallpaper Engine 網頁壁紙…") {
+                        NSApp.sendAction(#selector(AppDelegate.importWEAction), to: nil, from: nil)
+                    }
+                    Divider()
+                    Button("開啟壁紙庫資料夾") { model.openLibraryFolder() }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(.ultraThinMaterial))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 34, height: 34)
+                .help("加入壁紙")
+                .tourAnchor("add")
+
+                Spacer()
+
+                Button { surprise() } label: {
+                    Label("猜你喜歡", systemImage: "sparkles")
+                        .font(.system(size: 12, weight: .medium))
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(Capsule().fill(.ultraThinMaterial))
+                }
+                .buttonStyle(.plain)
+                .help("隨機挑一張套用")
+
+                roundIcon("questionmark") { tour.replay() }.help("使用導覽")
+                roundIcon("gearshape") {
+                    NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
+                }.help("設定（⌘,）")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .overlay(Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1), alignment: .bottom)
+    }
+
+    private func roundIcon(_ name: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: name)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(.ultraThinMaterial))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func surprise() {
+        let pool = model.pageItems.isEmpty ? model.items : model.pageItems
+        guard let pick = pool.randomElement() else { return }
+        model.apply(pick)
+        if model.page == .home, let i = featured.firstIndex(where: { $0.id == pick.id }) { heroIndex = i }
+        dbg("UI surprise=\(pick.title)")
+    }
+
+    // MARK: 首頁（大圖 + 橫向卡片列）
+
+    private var homeContent: some View {
+        VStack(spacing: 0) {
+            hero.frame(height: 400)
+            shelves
+        }
+    }
 
     private var hero: some View {
         GeometryReader { geo in
             ZStack(alignment: .bottomLeading) {
-                ZStack {
-                    LinearGradient(colors: [Color(red: 0.07, green: 0.09, blue: 0.18),
-                                            Color(red: 0.28, green: 0.12, blue: 0.36)],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                    LivePreview(item: heroItem)
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipped()
-                        .allowsHitTesting(false)
-                }
-                .frame(width: geo.size.width, height: geo.size.height)
+                LinearGradient(colors: [Color(red: 0.07, green: 0.09, blue: 0.18),
+                                        Color(red: 0.28, green: 0.12, blue: 0.36)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                LivePreview(item: heroItem)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                    .allowsHitTesting(false)
 
-                // 左下的暗角，文字才看得清楚（跟他一樣由下往上漸層）
                 LinearGradient(colors: [.black.opacity(0.9), .black.opacity(0.35), .clear],
                                startPoint: .bottomLeading, endPoint: .center)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("精選")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.65))
-
+                    Text("精選").font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.65))
                     Text(heroItem?.title ?? "還沒有壁紙")
-                        .font(.system(size: 44, weight: .bold, design: .serif))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-
-                    Text(metaLine)
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.7))
+                        .font(.system(size: 42, weight: .bold, design: .serif))
+                        .foregroundColor(.white).lineLimit(1)
+                    Text(metaLine).font(.system(size: 12)).foregroundColor(.white.opacity(0.7))
 
                     HStack(spacing: 10) {
                         Button {
@@ -843,26 +1017,22 @@ struct LibraryView: View {
                         Button {
                             if let h = heroItem { model.reveal(h) }
                         } label: {
-                            Label("在 Finder 顯示", systemImage: "folder")
-                                .font(.system(size: 12))
+                            Label("在 Finder 顯示", systemImage: "folder").font(.system(size: 12))
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
+                        .buttonStyle(.bordered).controlSize(.large)
                     }
                     .padding(.top, 6)
                 }
                 .padding(.leading, 44)
                 .padding(.bottom, 54)
 
-                // 左右箭頭
                 HStack {
                     arrow("chevron.left") { step(-1) }
                     Spacer()
                     arrow("chevron.right") { step(1) }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 26)
 
-                // 頁點
                 VStack {
                     Spacer()
                     dots.padding(.bottom, 18)
@@ -873,7 +1043,7 @@ struct LibraryView: View {
             .clipped()
             .tourAnchor("inspector")
         }
-        .frame(height: 430)
+        .frame(height: 400)
         .onHover { heroPaused = $0 }
     }
 
@@ -886,7 +1056,8 @@ struct LibraryView: View {
         case "web": bits.append("HTML 動態")
         default: bits.append("內建動態")
         }
-        bits.append(h.subtitle)
+        let sub = h.subtitle.trimmingCharacters(in: .whitespaces)
+        if !sub.isEmpty && !sub.hasPrefix(bits[0]) && !bits[0].hasPrefix(sub) { bits.append(sub) }
         return bits.joined(separator: " ‧ ")
     }
 
@@ -896,18 +1067,17 @@ struct LibraryView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(.white)
                 .frame(width: 38, height: 38)
-                .background(Circle().fill(.ultraThinMaterial))
-                .overlay(Circle().stroke(Color.white.opacity(0.2)))
+                .background(Circle().fill(.black.opacity(0.35)))
+                .overlay(Circle().stroke(Color.white.opacity(0.25)))
         }
         .buttonStyle(.plain)
-        .disabled(featured.count < 2)
     }
 
     private var dots: some View {
         HStack(spacing: 7) {
             ForEach(0..<min(featured.count, 12), id: \.self) { i in
                 Circle()
-                    .fill(i == heroIndex ? Color.white : Color.white.opacity(0.3))
+                    .fill(i == heroIndex ? Color.white : Color.white.opacity(0.35))
                     .frame(width: i == heroIndex ? 7 : 5, height: i == heroIndex ? 7 : 5)
                     .onTapGesture { withAnimation(.easeInOut(duration: 0.3)) { heroIndex = i } }
             }
@@ -926,32 +1096,40 @@ struct LibraryView: View {
     // MARK: 下面的橫向卡片列
 
     private var shelves: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                if isFiltering {
-                    if featured.isEmpty {
-                        VStack(spacing: 8) {
-                            Text("找不到符合的壁紙").font(.system(size: 15, weight: .semibold))
-                            Text("換個關鍵字，或把分類切回「全部」").font(.system(size: 12)).foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 40)
-                    } else {
-                        shelf("篩選結果", featured)
-                    }
+        VStack(alignment: .leading, spacing: 26) {
+            if isFiltering {
+                if featured.isEmpty {
+                    emptyState
                 } else {
-                    shelf("最新壁紙", latest)
-                    if !builtins.isEmpty { shelf("精選動態壁紙", builtins) }
-                    if !mine.isEmpty { shelf("我的壁紙", mine) }
+                    shelf("篩選結果", model.filtered)
                 }
+            } else {
+                shelf("最新壁紙", latest)
+                if !builtins.isEmpty { shelf("精選動態壁紙", builtins) }
+                if !mine.isEmpty { shelf("我的壁紙", mine) }
             }
-            .padding(.vertical, 22)
         }
+        .padding(.vertical, 22)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .tourAnchor("grid")
         .onChange(of: model.filter) { _, _ in heroIndex = 0
-            dbg("UI filter=\(model.filter) search=\(model.search) shown=\(featured.count)") }
+            dbg("UI filter=\(model.filter) search=\(model.search) shown=\(model.filtered.count)") }
         .onChange(of: model.search) { _, _ in heroIndex = 0
-            dbg("UI filter=\(model.filter) search=\(model.search) shown=\(featured.count)") }
+            dbg("UI filter=\(model.filter) search=\(model.search) shown=\(model.filtered.count)") }
+    }
+
+    private var emptyState: some View {
+        let isFavEmpty = model.page == .mine && model.favorites.isEmpty
+        return VStack(spacing: 8) {
+            Image(systemName: isFavEmpty ? "heart" : "sparkle.magnifyingglass")
+                .font(.system(size: 26)).foregroundColor(.secondary)
+            Text(isFavEmpty ? "還沒有最愛" : "找不到符合的壁紙")
+                .font(.system(size: 15, weight: .semibold))
+            Text(isFavEmpty ? "在卡片右下角按一下 ♡，就會收集到這裡" : "換個關鍵字，或把分類切回「全部」")
+                .font(.system(size: 12)).foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 60)
     }
 
     private func shelf(_ title: String, _ items: [WallpaperItem]) -> some View {
@@ -959,8 +1137,7 @@ struct LibraryView: View {
             HStack(spacing: 8) {
                 Text(title).font(.system(size: 17, weight: .bold))
                 Image(systemName: "chevron.right.circle.fill")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 13)).foregroundColor(.secondary)
                 Spacer()
                 Text("\(items.count) 張").font(.system(size: 10)).foregroundColor(.secondary)
             }
@@ -987,80 +1164,237 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: 頂部工具列（膠囊分頁 + 右側按鈕）
+    // MARK: 探索頁（標題 / 搜尋 / 熱門 / 分類 / 格狀）
 
-    private var topBar: some View {
-        HStack(spacing: 12) {
-            Menu {
-                Button("加入檔案…（影片 / 圖片 / GIF / HTML）") { model.pickFiles() }
-                Button("匯入 Wallpaper Engine 網頁壁紙…") {
-                    NSApp.sendAction(#selector(AppDelegate.importWEAction), to: nil, from: nil)
+    private var exploreContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // 問候 + 來源
+            HStack(spacing: 10) {
+                Text(greeting).font(.system(size: 17, weight: .semibold)).foregroundColor(.secondary)
+                HStack(spacing: 5) {
+                    Image(systemName: "square.grid.2x2.fill").font(.system(size: 9, weight: .bold))
+                    Text("DynWall").font(.system(size: 11, weight: .semibold))
+                    Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
                 }
-                Divider()
-                Button("開啟壁紙庫資料夾") { model.openLibraryFolder() }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 32, height: 32)
-                    .background(Capsule().fill(.ultraThinMaterial))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.12)))
+                .foregroundColor(.secondary)
+                Spacer()
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 32, height: 32)
-            .help("加入壁紙")
-            .tourAnchor("add")
 
-            Spacer()
+            Text(pageTitle).font(.system(size: 34, weight: .bold)).padding(.top, -4)
 
-            HStack(spacing: 2) {
-                ForEach(model.filters, id: \.self) { f in
-                    Button {
-                        model.filter = f
-                    } label: {
-                        Text(f)
-                            .font(.system(size: 12, weight: model.filter == f ? .semibold : .regular))
-                            .foregroundColor(model.filter == f ? .primary : .secondary)
-                            .padding(.horizontal, 14).padding(.vertical, 7)
-                            .background(Capsule().fill(model.filter == f ? Color.primary.opacity(0.12) : Color.clear))
+            // 搜尋列
+            HStack(spacing: 10) {
+                HStack(spacing: 9) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
+                    TextField("搜尋…", text: $model.search)
+                        .textFieldStyle(.plain).font(.system(size: 13))
+                    if !model.search.isEmpty {
+                        Button { model.search = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
+                        }.buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 11)
+                .background(Capsule().fill(Color.white.opacity(0.06)))
+                .overlay(Capsule().stroke(Color.white.opacity(0.09)))
+
+                roundIcon("link") { model.openLibraryFolder() }.help("開啟壁紙庫資料夾")
+                roundIcon("sparkles") { surprise() }.help("隨機挑一張")
+                roundIcon("arrow.clockwise") { model.refresh() }.help("重新掃描")
+            }
+
+            // 熱門
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Text("熱門:").font(.system(size: 11)).foregroundColor(.secondary)
+                    ForEach(model.hotWords, id: \.self) { w in
+                        Button { model.search = w } label: {
+                            Text(w).font(.system(size: 11))
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Capsule().fill(Color.white.opacity(0.06)))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
-            .padding(4)
-            .background(Capsule().fill(.ultraThinMaterial))
-            .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+
+            // 分類
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(model.categories, id: \.0) { c in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) { model.category = c.0 }
+                            dbg("UI category=\(c.0) items=\(model.pageItems.count)")
+                        } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: c.1)
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(c.2)
+                                    .frame(width: 20, height: 20)
+                                    .background(Circle().fill(c.2.opacity(0.18)))
+                                Text(c.0).font(.system(size: 12))
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Capsule().fill(model.category == c.0 ? Color.white.opacity(0.13) : Color.white.opacity(0.04)))
+                            .overlay(Capsule().stroke(model.category == c.0 ? c.2.opacity(0.55) : Color.white.opacity(0.06)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
             .tourAnchor("filters")
 
-            Spacer()
+            Text("\(model.pageItems.count) 段媒體・已載入 \(model.pageItems.count)")
+                .font(.system(size: 11)).foregroundColor(.secondary)
 
-            HStack(spacing: 8) {
-                TextField("搜尋…", text: $model.search)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11))
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .frame(width: 140)
-                    .background(Capsule().fill(.ultraThinMaterial))
-
-                Button { tour.replay() } label: {
-                    Image(systemName: "questionmark")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(.ultraThinMaterial))
+            if model.pageItems.isEmpty {
+                emptyState
+            } else {
+                LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 14) {
+                    ForEach(model.pageItems) { it in
+                        GridCard(item: it,
+                                 current: model.isCurrent(it),
+                                 fav: model.isFav(it.id),
+                                 onTap: { model.apply(it) },
+                                 onFav: { model.toggleFav(it.id) },
+                                 onReveal: { model.reveal(it) })
+                    }
                 }
-                .buttonStyle(.plain)
-                .help("再看一次使用導覽")
-
-                Button {
-                    NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(.ultraThinMaterial))
-                }
-                .buttonStyle(.plain)
-                .help("設定（⌘,）")
             }
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 18)
+        .padding(.bottom, 34)
+        .tourAnchor("grid")
+    }
+}
+
+// MARK: 探索頁的卡片（解析度徽章 / 標題 / 愛心）
+
+struct GridCard: View {
+    @ObservedObject var item: WallpaperItem
+    let current: Bool
+    let fav: Bool
+    let onTap: () -> Void
+    let onFav: () -> Void
+    let onReveal: () -> Void
+    @State private var hover = false
+    @State private var res = ""
+
+    var body: some View {
+        Button(action: onTap) {
+            // 用「透明 Rectangle + overlay」當底：圖片不會把卡片撐寬（不然最右邊那欄會被視窗切掉）
+            Rectangle()
+                .fill(Color.white.opacity(0.05))
+                .overlay {
+                    if let t = item.thumb {
+                        Image(nsImage: t).resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                .overlay(LinearGradient(colors: [.clear, .black.opacity(0.8)],
+                                        startPoint: .center, endPoint: .bottom))
+                .overlay(alignment: .topTrailing) {
+                    Text(res.isEmpty ? kindLabel : res)
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.92))
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Capsule().fill(.black.opacity(0.5)))
+                        .padding(8)
+                }
+                .overlay(alignment: .topLeading) {
+                    if current {
+                        Text("使用中")
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Capsule().fill(Color.accentColor))
+                            .foregroundColor(.white)
+                            .padding(8)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    HStack(spacing: 8) {
+                        Text(item.displayTitle)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Image(systemName: fav ? "heart.fill" : "heart")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(fav ? Color(red: 1, green: 0.35, blue: 0.5) : .white.opacity(0.75))
+                            .contentShape(Rectangle())
+                            .onTapGesture { onFav() }
+                            .help(fav ? "取消最愛" : "加入最愛")
+                    }
+                    .padding(.horizontal, 10).padding(.bottom, 9)
+                }
+                .overlay(alignment: .center) {
+                    if hover && !current {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(.black.opacity(0.45)))
+                    }
+                }
+                .frame(height: 168)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(current ? Color.accentColor : Color.white.opacity(0.08),
+                                lineWidth: current ? 2 : 1)
+                }
+                .scaleEffect(hover ? 1.015 : 1)
+                .animation(.easeOut(duration: 0.14), value: hover)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .contextMenu {
+            Button("在 Finder 顯示") { onReveal() }
+            Button(fav ? "取消最愛" : "加入最愛") { onFav() }
+        }
+        .task(id: item.id) { res = await Resolution.label(item) }
+    }
+
+    private var kindLabel: String {
+        switch item.kind {
+        case "video": return "動態"
+        case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : "靜態"
+        case "web": return "HTML"
+        default: return "內建"
+        }
+    }
+}
+
+// MARK: 解析度（給卡片右上角的徽章）
+
+enum Resolution {
+    static func label(_ item: WallpaperItem) async -> String {
+        switch item.kind {
+        case "image":
+            let u = URL(fileURLWithPath: resolveRef(item.ref))
+            if let src = CGImageSourceCreateWithURL(u as CFURL, nil),
+               let p = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+               let w = p[kCGImagePropertyPixelWidth] as? Int,
+               let h = p[kCGImagePropertyPixelHeight] as? Int {
+                return "\(w)x\(h)"
+            }
+            return "圖片"
+        case "video":
+            let a = AVURLAsset(url: URL(fileURLWithPath: resolveRef(item.ref)))
+            if let t = a.tracks(withMediaType: .video).first {
+                let s = t.naturalSize.applying(t.preferredTransform)
+                return "\(Int(abs(s.width).rounded()))x\(Int(abs(s.height).rounded()))"
+            }
+            return "影片"
+        case "web":
+            return "HTML"
+        default:
+            return "內建"
         }
     }
 }
