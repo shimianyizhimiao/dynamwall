@@ -1426,26 +1426,32 @@ struct WelcomeOverlay: View {
                         .font(.system(size: 13)).foregroundColor(.secondary)
                 }
 
-                VStack(spacing: 10) {
-                    ForEach(AppLang.allCases) { lang in
-                        Button { onPick(lang) } label: {
-                            HStack {
-                                Text(lang.label).font(.system(size: 15, weight: .medium))
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(AppLang.allCases) { lang in
+                            Button { onPick(lang) } label: {
+                                HStack {
+                                    Text(lang.label).font(.system(size: 14, weight: .medium))
+                                    Spacer()
+                                    if lang == AppLang.detect() {
+                                        Text("✓").font(.system(size: 11)).foregroundColor(.secondary)
+                                    }
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 10, weight: .semibold)).foregroundColor(.secondary)
+                                }
+                                .padding(.horizontal, 16).padding(.vertical, 11)
+                                .background(RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color.primary.opacity(hovered == lang ? 0.16 : 0.07)))
+                                .overlay(RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.primary.opacity(hovered == lang ? 0.32 : 0.10)))
                             }
-                            .padding(.horizontal, 18).padding(.vertical, 14)
-                            .background(RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.primary.opacity(hovered == lang ? 0.16 : 0.08)))
-                            .overlay(RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.primary.opacity(hovered == lang ? 0.35 : 0.12)))
+                            .buttonStyle(.plain)
+                            .onHover { hovered = $0 ? lang : nil }
                         }
-                        .buttonStyle(.plain)
-                        .onHover { hovered = $0 ? lang : nil }
                     }
+                    .padding(.horizontal, 2)
                 }
-                .frame(width: 300)
+                .frame(width: 320, height: 330)
 
                 Text("之後可以在「設定 → 一般」更改 · Change later in Settings")
                     .font(.system(size: 11)).foregroundColor(.secondary)

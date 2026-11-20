@@ -1,15 +1,15 @@
 # 動態壁紙 · DynWall
 
 <p>
-  <a href="https://github.com/shimianyizhimiao/dynamwall/releases/latest">
+  <a href="https://github.com/shimianyizhimiao/macos-live-wallpaper/releases/latest">
     <img alt="下載 macOS 版" src="https://img.shields.io/badge/⬇_下載_macOS_版-DynWall.dmg-2ea44f?style=for-the-badge&logo=apple&logoColor=white" height="42">
   </a>
-  <a href="https://shimianyizhimiao.github.io/dynamwall/">
+  <a href="https://shimianyizhimiao.github.io/macos-live-wallpaper/">
     <img alt="官方網站" src="https://img.shields.io/badge/官方網站-shimianyizhimiao.github.io-3b82f6?style=for-the-badge" height="42">
   </a>
 </p>
 
-**不想看程式碼，只想用？** → **[下載 DynWall.dmg](https://github.com/shimianyizhimiao/dynamwall/releases/latest)**，打開、把 App 拖進 Applications、第一次啟動先選語言就好（macOS 13+，Apple Silicon / Intel）。
+**不想看程式碼，只想用？** → **[下載 DynWall.dmg](https://github.com/shimianyizhimiao/macos-live-wallpaper/releases/latest)**，打開、把 App 拖進 Applications、第一次啟動先選語言就好（macOS 13+，Apple Silicon / Intel）。
 
 **僅限 macOS** · macOS 13+ · Apple Silicon 與 Intel · Swift + AppKit · 無第三方依賴
 
@@ -18,7 +18,7 @@
 
 [繁體中文](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt-BR.md) · [Русский](README.ru.md) · [Italiano](README.it.md)
 
-🌐 **官網：<https://shimianyizhimiao.github.io/dynamwall/>** · 
+🌐 **官網：<https://shimianyizhimiao.github.io/macos-live-wallpaper/>** · 
 📖 **完整使用說明（step-by-step）：[docs/使用說明.md](docs/使用說明.md)**
 
 一個原生的 macOS 動態壁紙程式：**影片、GIF、圖片、或自己寫的 HTML/CSS/JS 都可以變成桌面壁紙**，

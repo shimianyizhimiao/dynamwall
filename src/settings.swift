@@ -81,6 +81,15 @@ struct SettingsView: View {
 
     private func reload() { cfg = Engine.shared.config }
 
+    private func pick(_ lang: AppLang) {
+        var c = loadConfig()
+        c.lang = lang.rawValue
+        c.langChosen = true
+        saveConfig(c)
+        L10n.current = lang
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { relaunch() }
+    }
+
     /// sheet 或獨立視窗都能關：有 sheet 父視窗就 endSheet，否則直接關
     private func closeSelf() {
         guard let w = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.title.contains("設定") }) else { return }
@@ -96,25 +105,40 @@ struct SettingsView: View {
     private var general: some View {
         Form {
             Section {
-                Picker(T("語言"), selection: Binding(
-                    get: { cfg.lang },
-                    set: { v in
-                        var c = Engine.shared.config
-                        c.lang = v
-                        c.langChosen = true
-                        saveConfig(c)
-                        L10n.current = AppLang(rawValue: v) ?? .zhHant
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { relaunch() }
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(T("語言")).font(.system(size: 12, weight: .medium))
+                        Text("\(L10n.current.label) · \(AppLang.allCases.count) \(T("種語言"))")
+                            .font(.system(size: 10.5)).foregroundColor(.secondary)
                     }
-                )) {
-                    ForEach(AppLang.allCases) { l in
-                        Text(l.label).tag(l.rawValue)
+                    Spacer(minLength: 8)
+                    Menu {
+                        ForEach(AppLang.allCases) { l in
+                            Button {
+                                pick(l)
+                            } label: {
+                                if l.rawValue == L10n.current.rawValue {
+                                    Label(l.label, systemImage: "checkmark")
+                                } else {
+                                    Text(l.label)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(L10n.current.label).font(.system(size: 12))
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold))
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.07)))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.12)))
                     }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 }
-                .pickerStyle(.segmented)
                 Text(T("換語言後會自動重開 App（壁紙會繼續播放）。"))
                     .font(.system(size: 10.5)).foregroundColor(.secondary)
-            } header: { Text(T("語言 Language")) }
+            } header: { Text(T("語言")) }
 
             Section {
                 toggleRow(T("登入時自動啟動"), T("開機後在背景直接開始播壁紙，不開視窗。"),

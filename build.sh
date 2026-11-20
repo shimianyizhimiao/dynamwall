@@ -84,6 +84,7 @@ fi
 echo "==> 打包資源"
 cp -R "$RES/wallpapers" "$BUILD/$APP/Contents/Resources/"
 if [ -d "$RES/thumbs" ]; then cp -R "$RES/thumbs" "$BUILD/$APP/Contents/Resources/"; fi
+if [ -d "$RES/lang" ]; then cp -R "$RES/lang" "$BUILD/$APP/Contents/Resources/"; fi
 if [ -d "$RES/posters" ]; then cp -R "$RES/posters" "$BUILD/$APP/Contents/Resources/"; fi
 if [ -f "$RES/AppIcon.icns" ]; then cp "$RES/AppIcon.icns" "$BUILD/$APP/Contents/Resources/"; fi
 cp "$ROOT/Info.plist" "$BUILD/$APP/Contents/Info.plist"
