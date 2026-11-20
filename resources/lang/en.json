@@ -60,7 +60,7 @@
  "找不到符合的壁紙": "No wallpapers found",
  "探索壁紙庫": "Explore wallpapers",
  "換個關鍵字或分類試試": "Try another keyword or category",
- "換語言後會自動重開 App（壁紙會繼續播放）。": "The app restarts after switching language (the wallpaper keeps playing).",
+ "換語言後會自動重開 App（壁紙會繼續播放）。": "Applies immediately — no restart needed.",
  "搜尋…": "Search…",
  "播放": "Playback",
  "播放中": "Playing",
@@ -129,5 +129,6 @@
  "靜音": "Mute",
  "預設畫面縮放": "Scaling",
  "首頁": "Home",
- "種語言": "languages"
+ "種語言": "languages",
+ "切換後立即套用，不需要重開 App。": "Applies immediately — no restart needed."
 }

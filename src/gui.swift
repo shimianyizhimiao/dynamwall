@@ -313,6 +313,7 @@ final class Engine: ObservableObject {
     func setLockPoster(_ on: Bool) { app?.guiSetLockPoster(on) }
     func setLockVideo(_ on: Bool) { app?.guiSetLockVideo(on) }
     func pickLanguage(_ raw: String) { app?.pickLanguage(raw) }
+    func rebuildUI() { app?.rebuildUI() }
     var lockVideoProgress: String { app?.lockVideoProgress ?? "" }
 }
 

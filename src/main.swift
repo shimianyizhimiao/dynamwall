@@ -1114,6 +1114,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let i = args.firstIndex(of: "--cycle-test"), i + 1 < args.count, let period = Double(args[i + 1]) {
             startCycleTest(period: period)
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--lang"), i + 1 < CommandLine.arguments.count {
+            let code = CommandLine.arguments[i + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.pickLanguage(code) }
+        }
         if CommandLine.arguments.contains("--open-settings") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                 NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
@@ -2173,6 +2177,25 @@ extension AppDelegate {
         }
     }
 
+    /// 換語言後就地重建所有視窗（重開 App 會留下舊的設定視窗，看起來像沒同步）
+    func rebuildUI() {
+        if let w = libraryWindow {
+            let size = w.contentView?.frame.size ?? NSSize(width: 1060, height: 700)
+            w.contentView = NSHostingView(rootView: LibraryView(model: libraryModel))
+            w.contentView?.frame = NSRect(origin: .zero, size: size)
+            w.contentView?.needsLayout = true
+            w.title = T("壁紙庫")
+        }
+        if let w = settingsWindow {
+            let size = w.contentView?.frame.size ?? NSSize(width: 620, height: 550)
+            w.contentView = NSHostingView(rootView: SettingsView())
+            w.contentView?.frame = NSRect(origin: .zero, size: size)
+            w.title = T("設定")
+        }
+        buildStatusItem()
+        say("UI-REBUILD lang=\(L10n.current.rawValue)")
+    }
+
     // MARK: 壁紙庫視窗
 
     func showLibraryWindow() {
@@ -2540,12 +2563,12 @@ extension AppDelegate {
     }
 
     func pickLanguage(_ raw: String) {
-        var c = loadConfig()
-        c.lang = raw
-        c.langChosen = true
-        saveConfig(c)
+        cfg.lang = raw
+        cfg.langChosen = true
+        saveConfig(cfg)
+        L10n.current = AppLang(rawValue: raw) ?? .zhHant
         say("LANG picked=\(raw)")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { relaunch() }
+        rebuildUI()
     }
 
     func guiSetLockVideo(_ on: Bool) {

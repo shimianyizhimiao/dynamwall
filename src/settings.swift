@@ -87,7 +87,7 @@ struct SettingsView: View {
         c.langChosen = true
         saveConfig(c)
         L10n.current = lang
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { relaunch() }
+        Engine.shared.rebuildUI()
     }
 
     /// sheet 或獨立視窗都能關：有 sheet 父視窗就 endSheet，否則直接關
@@ -136,7 +136,7 @@ struct SettingsView: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
                 }
-                Text(T("換語言後會自動重開 App（壁紙會繼續播放）。"))
+                Text(T("切換後立即套用，不需要重開 App。"))
                     .font(.system(size: 10.5)).foregroundColor(.secondary)
             } header: { Text(T("語言")) }
 
