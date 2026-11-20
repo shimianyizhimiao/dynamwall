@@ -1078,7 +1078,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
                                                          reason: "播放動態壁紙")
         say("APP-NAP disabled")
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
         Engine.shared.app = self
         ensureDirs()
         // 獨立打包的 App：第一次啟動時把自己內建的預設壁紙寫進設定（@bundle: 指向 App 內部檔案）
@@ -1141,6 +1141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let on = CommandLine.arguments[i + 1] == "on"
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { _ = self.setAutoStart(on) }
         }
+        buildMainMenu()
         if CommandLine.arguments.contains("--open-settings") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                 NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
@@ -1559,6 +1560,92 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         let h = NSScreen.screens.first?.frame.height ?? 0
         let f = statusItem.button?.window?.frame ?? .zero
         say("STATUSITEM-RECREATE frame=\(f.debugDescription) screenH=\(h) atTop=\(abs((f.maxY) - h) < 2)")
+    }
+
+
+    // MARK: 主選單（不然 App 在前景時選單列是空的，看起來像「選單列頂不出來」）
+    func buildMainMenu() {
+        let main = NSMenu()
+
+        // App 選單
+        let appItem = NSMenuItem()
+        main.addItem(appItem)
+        let appMenu = NSMenu()
+        appItem.submenu = appMenu
+        appMenu.addItem(withTitle: T("關於 DynWall"), action: #selector(showAbout), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: T("設定…"), action: #selector(showSettingsAction), keyEquivalent: ",")
+        appMenu.addItem(withTitle: T("顯示壁紙庫"), action: #selector(showLibraryAction), keyEquivalent: "0")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: T("隱藏 DynWall"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: T("結束 DynWall"), action: #selector(quitApp), keyEquivalent: "q")
+
+        // 檔案
+        let fileItem = NSMenuItem(); main.addItem(fileItem)
+        let fileMenu = NSMenu(title: T("檔案")); fileItem.submenu = fileMenu
+        fileMenu.addItem(withTitle: T("加入影片…"), action: #selector(pickVideo), keyEquivalent: "o")
+        fileMenu.addItem(withTitle: T("加入 HTML…"), action: #selector(pickHTML), keyEquivalent: "")
+        fileMenu.addItem(withTitle: T("加入圖片／GIF…"), action: #selector(pickImage), keyEquivalent: "")
+        fileMenu.addItem(NSMenuItem.separator())
+        fileMenu.addItem(withTitle: T("關閉視窗"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+
+        // 檢視
+        let viewItem = NSMenuItem(); main.addItem(viewItem)
+        let viewMenu = NSMenu(title: T("檢視")); viewItem.submenu = viewMenu
+        viewMenu.addItem(withTitle: T("首頁"), action: #selector(gotoHome), keyEquivalent: "1")
+        viewMenu.addItem(withTitle: T("靜態"), action: #selector(gotoStill), keyEquivalent: "2")
+        viewMenu.addItem(withTitle: T("動態"), action: #selector(gotoMotion), keyEquivalent: "3")
+        viewMenu.addItem(withTitle: T("我的"), action: #selector(gotoMine), keyEquivalent: "4")
+        viewMenu.addItem(NSMenuItem.separator())
+        viewMenu.addItem(withTitle: T("猜你喜歡"), action: #selector(surpriseAction), keyEquivalent: "r")
+
+        // 播放
+        let playItem = NSMenuItem(); main.addItem(playItem)
+        let playMenu = NSMenu(title: T("播放")); playItem.submenu = playMenu
+        playMenu.addItem(withTitle: cfg.paused ? T("繼續播放") : T("暫停播放"), action: #selector(togglePause), keyEquivalent: "p")
+        playMenu.addItem(withTitle: T("靜音"), action: #selector(toggleMute), keyEquivalent: "m")
+        let rateRoot = NSMenuItem(title: T("播放速度"), action: nil, keyEquivalent: "")
+        let rateMenu = NSMenu()
+        rateRoot.submenu = rateMenu
+        for r in [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0] {
+            let it = NSMenuItem(title: String(format: "%.2fx", r), action: #selector(pickRate(_:)), keyEquivalent: "")
+            it.representedObject = r
+            it.state = abs(cfg.rate - r) < 0.01 ? .on : .off
+            rateMenu.addItem(it)
+        }
+        playMenu.addItem(rateRoot)
+        playMenu.addItem(NSMenuItem.separator())
+        playMenu.addItem(withTitle: T("重新載入壁紙"), action: #selector(reloadWallpaper), keyEquivalent: "")
+
+        // 視窗
+        let winItem = NSMenuItem(); main.addItem(winItem)
+        let winMenu = NSMenu(title: T("視窗")); winItem.submenu = winMenu
+        winMenu.addItem(withTitle: T("顯示壁紙庫"), action: #selector(showLibraryAction), keyEquivalent: "")
+        winMenu.addItem(withTitle: T("最小化"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "")
+        NSApp.windowsMenu = winMenu
+
+        // 說明
+        let helpItem = NSMenuItem(); main.addItem(helpItem)
+        let helpMenu = NSMenu(title: T("說明")); helpItem.submenu = helpMenu
+        helpMenu.addItem(withTitle: T("重新播放導覽"), action: #selector(replayTourAction), keyEquivalent: "")
+        helpMenu.addItem(withTitle: T("使用說明"), action: #selector(openDocsAction), keyEquivalent: "?")
+
+        NSApp.mainMenu = main
+        say("MAINMENU items=\(main.items.count)")
+    }
+
+    @objc func gotoHome() { libraryModel.page = .home; showLibraryWindow() }
+    @objc func gotoStill() { libraryModel.page = .still; showLibraryWindow() }
+    @objc func gotoMotion() { libraryModel.page = .motion; showLibraryWindow() }
+    @objc func gotoMine() { libraryModel.page = .mine; showLibraryWindow() }
+    @objc func surpriseAction() {
+        let pool = libraryModel.pageItems.isEmpty ? libraryModel.items : libraryModel.pageItems
+        if let pick = pool.randomElement() { _ = pick; libraryModel.apply(pick) }
+        showLibraryWindow()
+    }
+    @objc func replayTourAction() { TourState.shared.replay(); showLibraryWindow() }
+    @objc func openDocsAction() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/shimianyizhimiao/macos-live-wallpaper#readme")!)
     }
 
     func buildStatusItem() {
@@ -2348,8 +2435,7 @@ extension AppDelegate {
 
     func windowWillClose(_ notification: Notification) {
         if (notification.object as? NSWindow) === libraryWindow {
-            NSApp.setActivationPolicy(.accessory)
-            say("LIBRARY-CLOSE")
+            say("LIBRARY-CLOSE（Dock 圖示保留，右鍵可再開）")
         }
     }
 
