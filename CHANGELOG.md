@@ -1,5 +1,16 @@
 # 更新紀錄
 
+## v0.9.7
+
+### 修：切程式再回到桌面，壁紙定格
+
+兩個原因一起處理：
+
+- **App Nap**：壁紙是長時間播放的影片，被系統降頻後「時間照走但畫面不動」。現在啟動時 `beginActivity(.userInitiated, .latencyCritical)` 並在 `Info.plist` 設 `NSAppSleepDisabled`
+- **AVPlayerLayer 不回報**：視窗被全螢幕／別的程式蓋住再露出來，層不會自己重畫。現在切程式、換 Space、遮擋狀態恢復都會 `seek` 補一格
+- 額外 watchdog：每 3 秒比對播放時間，連續兩次沒前進就先 seek、再不行就重掛 `AVPlayerItem`（`UNFREEZE` 日誌）
+- 全螢幕誤判：Finder／Dock 不算全螢幕，而且視窗必須從 (0,0) 蓋滿整個螢幕才會暫停（之前「放大的視窗」會被當成全螢幕，導致暫停後回不來）
+
 ## v0.9.6
 
 ### 移除「鎖定畫面動態」——macOS 不允許，留著只會騙人

@@ -369,6 +369,10 @@ final class ScreenWallpaper {
     var reloadWork: DispatchWorkItem?
     var currentHTML: URL?
     var lastFrameSample: (Int, Date)?
+    var lastVideoTime: Double = -1
+    var frozenTicks = 0
+    var lastNudgeAt = Date.distantPast
+    var currentVideoURL: URL?
     var cfg = Config()
     var posterWork: DispatchWorkItem?
     var posterJob: SnapshotJob?
@@ -895,6 +899,44 @@ final class ScreenWallpaper {
         }
     }
 
+    /// 影片「看起來在播但畫面定格」的救援：先 seek 一下，沒用就重掛 item
+    func unfreezeVideo() {
+        guard let p = player else { return }
+        frozenTicks += 1
+        if frozenTicks == 1, let t = p.currentItem?.currentTime() {
+            say("UNFREEZE seek screen=\(displayID)")
+            p.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero) { _ in p.play() }
+            return
+        }
+        if let url = currentVideoURL {
+            say("UNFREEZE rebuild screen=\(displayID) url=\(url.lastPathComponent)")
+            let item = AVPlayerItem(url: url)
+            p.replaceCurrentItem(with: item)
+            p.play()
+        }
+        frozenTicks = 0
+    }
+
+    /// 被別的視窗蓋住再露出來時，替這個螢幕補一格
+    func watchOcclusion() {
+        NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification,
+                                               object: nil, queue: .main) { [weak self] note in
+            guard let self, (note.object as? NSWindow) === self.window else { return }
+            if self.window.occlusionState.contains(.visible) { self.nudgeFrame() }
+        }
+    }
+
+    /// 強制重畫一格：被全螢幕或別的程式蓋住再回來時，AVPlayerLayer 不會自己更新
+    func nudgeFrame() {
+        guard let p = player, !cfg.paused else { return }
+        guard Date().timeIntervalSince(lastNudgeAt) > 0.5 else { return }
+        lastNudgeAt = Date()
+        let t = p.currentTime()
+        p.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+            if !self.cfg.paused { p.play() }
+        }
+    }
+
     func pauseContent() {
         player?.pause()
         webView?.evaluateJavaScript(Self.jsPause, completionHandler: nil)
@@ -977,6 +1019,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var headless = false   // 測試模式：不要彈 NSAlert 卡住主執行緒
     var lockVideoWaiting = false
     var lockVideoInteractive = false
+    var activity: NSObjectProtocol?
     var lockSyncWork: DispatchWorkItem?
     var lockVideoProgress = ""
     /// 啟動前每台螢幕原本的桌布，供「關掉 App 後保留桌面」關閉時還原
@@ -987,7 +1030,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var healthTimer: Timer?
     var screenSyncWork: DispatchWorkItem?
     var lastPosterRefreshAt = Date.distantPast
-    var activity: NSObjectProtocol?
     var libraryWindow: NSWindow?
     var settingsWindow: NSWindow?
     let libraryModel = LibraryModel()
@@ -1001,6 +1043,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             }
         }
         say("ORIGINAL-DESKTOP \(originalDesktop.mapValues { $0.lastPathComponent })")
+        // 壁紙是長時間播放的影片，被系統 App Nap 壓下去會「看起來在播但畫面不動」
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            for sw in self.screens { sw.nudgeFrame() }
+            say("NUDGE app-activate")
+        }
+        nc.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            for sw in self.screens { sw.nudgeFrame() }
+            say("NUDGE space-change")
+        }
+        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
+                                                         reason: "播放動態壁紙")
+        say("APP-NAP disabled")
         NSApp.setActivationPolicy(.accessory)
         Engine.shared.app = self
         ensureDirs()
@@ -1222,6 +1279,7 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
             guard let n = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
             if !existing.contains(n.uint32Value), let sw = ScreenWallpaper(screen: s) {
                 screens.append(sw)
+                sw.watchOcclusion()
                 fresh.insert(n.uint32Value)
                 say("SCREEN-ADD id=\(n.uint32Value)")
             }
@@ -1340,7 +1398,28 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         return (d["CGSSessionScreenIsLocked"] as? Bool) ?? false
     }
 
+    var healthLogTick = 0
+
     func healthTick() {
+        healthLogTick += 1
+        if healthLogTick % 3 == 0 {
+            for sw in screens {
+                if let p = sw.player {
+                    let st: String
+                    switch p.timeControlStatus {
+                    case .playing: st = "playing"
+                    case .paused: st = "paused"
+                    case .waitingToPlayAtSpecifiedRate: st = "waiting"
+                    @unknown default: st = "?"
+                    }
+                    say(String(format: "HEALTH-PLAY d=%u t=%.2f %@ rate=%.1f vis=%d occl=%d pausedByFull=%@ sys=%@",
+                               sw.displayID, p.currentTime().seconds, st, p.rate,
+                               sw.window.isVisible ? 1 : 0,
+                               sw.window.occlusionState.contains(.visible) ? 1 : 0,
+                               pausedByFullscreen ? "1" : "0", pausedBySystem ? "1" : "0"))
+                }
+            }
+        }
         let asleep = CGDisplayIsAsleep(CGMainDisplayID()) != 0
         let locked = isScreenLocked()
         let shouldPause = asleep || locked
@@ -1363,6 +1442,15 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
                     sw.lastReorderAt = Date()
                     say("HEALTH reorder screen=\(sw.displayID)")
                 }
+            }
+            if let p = sw.player, !cfg.paused, !pausedByFullscreen, !pausedBySystem {
+                let t = p.currentTime().seconds
+                if abs(t - sw.lastVideoTime) < 0.03 {
+                    sw.unfreezeVideo()
+                } else {
+                    sw.frozenTicks = 0
+                }
+                sw.lastVideoTime = t
             }
             if let p = sw.player, !cfg.paused, p.timeControlStatus == .paused {
                 sw.idleTicks += 1
@@ -2552,7 +2640,9 @@ extension AppDelegate {
 
     func isFullscreenAppActive() -> Bool {
         guard let front = NSWorkspace.shared.frontmostApplication,
-              front.bundleIdentifier != Bundle.main.bundleIdentifier else { return false }
+              front.bundleIdentifier != Bundle.main.bundleIdentifier,
+              front.bundleIdentifier != "com.apple.finder",
+              front.bundleIdentifier != "com.apple.dock" else { return false }
         let pid = front.processIdentifier
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                     kCGNullWindowID) as? [[String: Any]] else { return false }
@@ -2561,7 +2651,8 @@ extension AppDelegate {
             guard (w[kCGWindowOwnerPID as String] as? pid_t) == pid,
                   let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
             let r = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
-            if abs(r.width - target.width) < 4 && abs(r.height - target.height) < 4 { return true }
+            // 真正全螢幕：左上角貼齊 (0,0) 而且整個螢幕都蓋住（含選單列）
+            if r.origin.x < 2 && r.origin.y < 2 && abs(r.width - target.width) < 4 && abs(r.height - target.height) < 4 { return true }
         }
         return false
     }
