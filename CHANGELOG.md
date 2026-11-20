@@ -1,5 +1,16 @@
 # 更新紀錄
 
+## v0.9.13
+
+### 修：v0.9.12 之後經常死機（97% CPU）
+
+v0.9.12 加「選單列圖示 0 高度就重建」時，`buildStatusItem()` 自己也排了一次檢查，而重建又呼叫 `buildStatusItem()` —— 變成 **build → ensure → recreate → build** 的無限迴圈，每秒重建幾十次、CPU 吃到 97%，整個 App 看起來像死機。
+
+修法：
+- 排程只留在啟動時，`buildStatusItem()` 不再自己排檢查
+- `ensureStatusItemVisible()` 加防重入旗標，最多 3 次、間隔 1.5 秒，之後放棄（改靠 Dock 圖示）
+- 實測：啟動後 STATUSITEM 只 1 行、CPU 從 97% 回到 8%（播放影片時的正常值）
+
 ## v0.9.12
 
 朋友實測回報的一批 BUG：

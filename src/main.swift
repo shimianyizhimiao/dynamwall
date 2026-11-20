@@ -1528,16 +1528,24 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
 
     // MARK: 選單列
 
-    /// 選單列自動隱藏時 status item 會卡在 0 高度/錯誤座標：檢查 → 重建，最多 6 次
-    func ensureStatusItemVisible(attempt: Int) {
+    /// 選單列自動隱藏時 status item 會卡在 0 高度：最多檢查/重建 3 次，且不可重入
+    /// （之前 build → ensure → recreate → build 互相排程，變成 97% CPU 的無限迴圈）
+    private var statusRepairing = false
+
+    func ensureStatusItemVisible(attempt: Int = 1) {
+        guard !statusRepairing else { return }
+        statusRepairing = true
+        defer { statusRepairing = false }
+
         let h = NSScreen.screens.first?.frame.height ?? 0
         let f = statusItem?.button?.window?.frame ?? .zero
         let ok = f.height >= 20 && abs(f.maxY - h) < 3
         say("STATUSITEM-CHECK attempt=\(attempt) frame=\(f.debugDescription) ok=\(ok)")
         if ok { return }
+        if attempt >= 3 { say("STATUSITEM give-up（選單列目前是隱藏狀態，Dock 圖示仍可用）"); return }
         recreateStatusItem()
-        if attempt < 6 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.ensureStatusItemVisible(attempt: attempt + 1) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.ensureStatusItemVisible(attempt: attempt + 1)
         }
     }
 
@@ -1569,9 +1577,7 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         menu.delegate = self
         statusItem.menu = menu
         statusItem.isVisible = true
-        // 選單列自動隱藏時，剛建立的 status item 會是 0 高度、座標也會卡住；
-        // 延後「整個重建」一次，讓系統在選單列有高度時重新擺位。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.ensureStatusItemVisible(attempt: 1) }
+
         let bw = statusItem.button?.window
         say("STATUSITEM hasImage=\(statusItem.button?.image != nil) title=\(statusItem.button?.title ?? "") "
             + "windowExists=\(bw != nil) frame=\(bw?.frame.debugDescription ?? "nil") "
@@ -2296,7 +2302,7 @@ extension AppDelegate {
             w.title = T("設定")
         }
         buildStatusItem()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.ensureStatusItemVisible(attempt: 1) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.ensureStatusItemVisible() }
         say("UI-REBUILD lang=\(L10n.current.rawValue)")
     }
 
