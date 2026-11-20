@@ -58,7 +58,7 @@ struct SettingsView: View {
             .padding(.horizontal, 18)
             .padding(.bottom, 12)
         }
-        .onAppear { reload(); cacheMB = Self.cacheSizeMB() }
+        .onAppear { reload(); cacheMB = Self.cacheSizeMB(); autoStatus = Engine.shared.autoStartStatusText() }
     }
 
     /// 每個開關都給標題＋一行說明，避免只看到兩顆「不知道是什麼」的膠囊
@@ -141,8 +141,21 @@ struct SettingsView: View {
             } header: { Text(T("語言")) }
 
             Section {
-                toggleRow(T("登入時自動啟動"), T("開機後在背景直接開始播壁紙，不開視窗。"),
-                          bind(\.autoStart, { Engine.shared.setAutoStart($0) }))
+                toggleRow(T("登入時自動啟動"), autoStartDesc,
+                          bind(\.autoStart, { on in
+                              _ = Engine.shared.setAutoStart(on)
+                              autoStatus = Engine.shared.autoStartStatusText()
+                          }))
+                if autoStatus == "requiresApproval" {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange).font(.system(size: 10))
+                        Text(T("macOS 還在等你批准：系統設定 → 一般 → 登入項目，允許 DynWall 在背景執行。"))
+                            .font(.system(size: 10)).foregroundColor(.orange)
+                        Button(T("打開設定")) {
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
+                        }.font(.system(size: 10))
+                    }
+                }
                 toggleRow(T("關掉 App 後保留桌面"), T("結束 App 時把當下畫面留在桌面。關掉的話，結束時會還原你原本的桌布。"),
                           bind(\.poster, { Engine.shared.setPoster($0) }))
                 toggleRow(T("鎖定畫面顯示當下畫面"), T("打密碼那個畫面系統只認「桌布圖」，所以一定要有一張靜態圖；關掉就會看到你原本的桌布。"),
@@ -299,6 +312,21 @@ struct SettingsView: View {
 
     // MARK: 關於
 
+    @State private var autoStatus = ""
+    private var autoStartDesc: String {
+        switch autoStatus {
+        case "enabled": return T("已登記在「登入項目」，下次開機會自動在背景啟動。")
+        case "requiresApproval": return T("已送出，但 macOS 要你批准一次才會生效。")
+        case "agent": return T("舊式 LaunchAgent 模式。")
+        default: return T("開機後在背景直接開始播壁紙，不開視窗。")
+        }
+    }
+
+    @State private var checking = false
+    @State private var checkVersion: String?
+    @State private var checkResult: String?
+    @State private var tick = false
+
     private var about: some View {
         VStack(spacing: 10) {
             if let icon = NSImage(named: NSImage.applicationIconName) {
@@ -311,12 +339,45 @@ struct SettingsView: View {
             Divider().padding(.vertical, 4)
 
             VStack(alignment: .leading, spacing: 6) {
-                row("作者", "shimianyizhimiao")
-                row("授權", "PolyForm Noncommercial 1.0.0 + Share-Alike")
-                row("原始碼", "github.com/shimianyizhimiao/dynwall")
-                row("系統需求", "macOS 13 以上・Apple Silicon 與 Intel")
+                row(T("作者"), "shimianyizhimiao")
+                row(T("授權"), "PolyForm Noncommercial 1.0.0 + Share-Alike")
+                row(T("原始碼"), "github.com/shimianyizhimiao/macos-live-wallpaper")
+                row(T("系統需求"), T("macOS 13 以上・Apple Silicon 與 Intel"))
             }
             .frame(width: 460, alignment: .leading)
+
+            Divider().padding(.vertical, 4)
+
+            VStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    Button {
+                        checking = true; checkVersion = nil; checkResult = nil
+                        Updater.shared.check { _ in
+                            checking = false
+                            checkResult = Updater.shared.lastError
+                            checkVersion = Updater.shared.latest?.version
+                        }
+                    } label: {
+                        Text(checking ? T("檢查中…") : T("檢查更新")).frame(width: 84)
+                    }
+                    .disabled(checking)
+
+                    if let v = checkVersion {
+                        if Updater.shared.hasUpdate {
+                            Text("\(T("有新版本")) v\(v)").font(.system(size: 11, weight: .semibold)).foregroundColor(.green)
+                            Button(T("前往下載")) { NSWorkspace.shared.open(Updater.shared.latest?.pageURL ?? Updater.downloadPage) }
+                        } else {
+                            Text(T("已是最新版本")).font(.system(size: 11)).foregroundColor(.secondary)
+                        }
+                    } else if let e = checkResult {
+                        Text("\(T("檢查失敗"))：\(e)").font(.system(size: 10)).foregroundColor(.red).lineLimit(1)
+                    } else {
+                        Text("\(T("目前版本")) \(version)").font(.system(size: 11)).foregroundColor(.secondary)
+                    }
+                }
+                Text(T("檢查更新需要連上網路；播放壁紙本身完全不需要網路。"))
+                    .font(.system(size: 9)).foregroundColor(.secondary)
+            }
 
             Text(T("個人專案，可能還有一些 BUG；若你是從付費管道拿到，那不是作者發布的版本。"))
                 .font(.system(size: 10)).foregroundColor(.secondary)

@@ -6,6 +6,7 @@
 //  macOS 桌面動態壁紙：影片 / HTML(CSS+JS) / 圖片 GIF
 //  視窗放在「桌面圖示之下、桌面圖片之上」，所以桌面上按右鍵、點圖示都正常。
 import Cocoa
+import ServiceManagement
 import ImageIO
 import AVFoundation
 import WebKit
@@ -788,6 +789,7 @@ final class ScreenWallpaper {
         playerLayer = layer
         p.play()
         if cfg.rate != 1.0 { p.rate = Float(cfg.rate) }
+        if cfg.rate != 1.0 { p.rate = Float(cfg.rate) }
         addDimIfNeeded()
         return true
     }
@@ -919,7 +921,7 @@ final class ScreenWallpaper {
         frozenTicks += 1
         if frozenTicks == 1, let t = p.currentItem?.currentTime() {
             say("UNFREEZE seek screen=\(displayID)")
-            p.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero) { _ in p.play() }
+            p.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero) { _ in p.play(); if self.cfg.rate != 1.0 { p.rate = Float(self.cfg.rate) } }
             return
         }
         if let url = currentVideoURL {
@@ -927,6 +929,8 @@ final class ScreenWallpaper {
             let item = AVPlayerItem(url: url)
             p.replaceCurrentItem(with: item)
             p.play()
+            if self.cfg.rate != 1.0 { p.rate = Float(self.cfg.rate) }
+        if cfg.rate != 1.0 { p.rate = Float(cfg.rate) }
         }
         frozenTicks = 0
     }
@@ -947,7 +951,7 @@ final class ScreenWallpaper {
         lastNudgeAt = Date()
         let t = p.currentTime()
         p.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
-            if !self.cfg.paused { p.play() }
+            if !self.cfg.paused { p.play(); p.rate = Float(self.cfg.rate) }
         }
     }
 
@@ -959,6 +963,8 @@ final class ScreenWallpaper {
     func resumeContent() {
         if let p = player {
             p.play()
+            if self.cfg.rate != 1.0 { p.rate = Float(self.cfg.rate) }
+        if cfg.rate != 1.0 { p.rate = Float(cfg.rate) }
             if cfg.rate != 1.0 { p.rate = Float(cfg.rate) }
         }
         if webView != nil { webView?.evaluateJavaScript(Self.jsResume, completionHandler: nil) }
@@ -1117,6 +1123,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let i = CommandLine.arguments.firstIndex(of: "--lang"), i + 1 < CommandLine.arguments.count {
             let code = CommandLine.arguments[i + 1]
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.pickLanguage(code) }
+        }
+        if let i = CommandLine.arguments.firstIndex(of: "--rate"), i + 1 < CommandLine.arguments.count,
+           let r = Double(CommandLine.arguments[i + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.guiSetRate(r) }
+        }
+        if CommandLine.arguments.contains("--check-update") {
+            Updater.shared.check { r in
+                say("CHECK-UPDATE version=\(r?.version ?? "nil") hasUpdate=\(Updater.shared.hasUpdate)")
+            }
+        }
+        // 開機後 8 秒靜默檢查一次；有新版只在記錄與選單提示，不打擾
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            Updater.shared.check { _ in }
+        }
+        if let i = CommandLine.arguments.firstIndex(of: "--autostart"), i + 1 < CommandLine.arguments.count {
+            let on = CommandLine.arguments[i + 1] == "on"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { _ = self.setAutoStart(on) }
         }
         if CommandLine.arguments.contains("--open-settings") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -1427,6 +1450,16 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
 
     func healthTick() {
         healthLogTick += 1
+        // 速度自我修復：任何 play() / 重掛 item 都會把 rate 拉回 1.0，這裡每 3 秒校正一次
+        for sw in screens {
+            guard let p = sw.player, !cfg.paused, cfg.kind == "video" else { continue }
+            let want = Float(cfg.rate)
+            if abs(p.rate - want) > 0.01 && p.timeControlStatus == .playing {
+                p.defaultRate = want
+                p.rate = want
+                say("RATE-FIX want=\(want) was=\(p.rate)")
+            }
+        }
         if healthLogTick % 3 == 0 {
             for sw in screens {
                 if let p = sw.player {
@@ -1481,6 +1514,8 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
                 sw.idleTicks += 1
                 if sw.idleTicks >= 2 {   // 連續兩次（6 秒）都沒在播才重播，避免打斷緩衝
                     p.play()
+            if self.cfg.rate != 1.0 { p.rate = Float(self.cfg.rate) }
+        if cfg.rate != 1.0 { p.rate = Float(cfg.rate) }
                     if cfg.rate != 1.0 { p.rate = Float(cfg.rate) }
                     sw.idleTicks = 0
                     say("HEALTH replay screen=\(sw.displayID)")
@@ -1493,11 +1528,37 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
 
     // MARK: 選單列
 
+    /// 選單列自動隱藏時 status item 會卡在 0 高度/錯誤座標：檢查 → 重建，最多 6 次
+    func ensureStatusItemVisible(attempt: Int) {
+        let h = NSScreen.screens.first?.frame.height ?? 0
+        let f = statusItem?.button?.window?.frame ?? .zero
+        let ok = f.height >= 20 && abs(f.maxY - h) < 3
+        say("STATUSITEM-CHECK attempt=\(attempt) frame=\(f.debugDescription) ok=\(ok)")
+        if ok { return }
+        recreateStatusItem()
+        if attempt < 6 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.ensureStatusItemVisible(attempt: attempt + 1) }
+        }
+    }
+
+    func recreateStatusItem() {
+        if let old = statusItem {
+            old.menu = nil
+            NSStatusBar.system.removeStatusItem(old)
+        }
+        statusItem = nil
+        buildStatusItem()
+        let h = NSScreen.screens.first?.frame.height ?? 0
+        let f = statusItem.button?.window?.frame ?? .zero
+        say("STATUSITEM-RECREATE frame=\(f.debugDescription) screenH=\(h) atTop=\(abs((f.maxY) - h) < 2)")
+    }
+
     func buildStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let b = statusItem.button {
             if let img = NSImage(systemSymbolName: "photo.on.rectangle.angled", accessibilityDescription: "動態壁紙") {
                 img.isTemplate = true
+                img.size = NSSize(width: 18, height: 18)
                 b.image = img
             } else {
                 b.title = "壁紙"
@@ -1507,6 +1568,10 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
+        statusItem.isVisible = true
+        // 選單列自動隱藏時，剛建立的 status item 會是 0 高度、座標也會卡住；
+        // 延後「整個重建」一次，讓系統在選單列有高度時重新擺位。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.ensureStatusItemVisible(attempt: 1) }
         let bw = statusItem.button?.window
         say("STATUSITEM hasImage=\(statusItem.button?.image != nil) title=\(statusItem.button?.title ?? "") "
             + "windowExists=\(bw != nil) frame=\(bw?.frame.debugDescription ?? "nil") "
@@ -1935,8 +2000,41 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         return true
     }
 
+    /// 登入時自動啟動：優先用 macOS 13+ 的 SMAppService（會出現在「登入項目」，系統會問一次）
+    var autoStartStatus: String { autoStartStatusText() }
+
+    func autoStartStatusText() -> String {
+        if #available(macOS 13.0, *) {
+            switch SMAppService.mainApp.status {
+            case .enabled: return "enabled"
+            case .requiresApproval: return "requiresApproval"
+            case .notRegistered: return "notRegistered"
+            case .notFound: return "notFound"
+            @unknown default: return "unknown"
+            }
+        }
+        return fm.fileExists(atPath: AGENT_URL.path) ? "agent" : "off"
+    }
+
     @discardableResult
     func setAutoStart(_ on: Bool) -> Bool {
+        if #available(macOS 13.0, *) {
+            do {
+                if on {
+                    if SMAppService.mainApp.status != .enabled { try SMAppService.mainApp.register() }
+                } else if SMAppService.mainApp.status != .notRegistered {
+                    try SMAppService.mainApp.unregister()
+                }
+                cfg.autoStart = on
+                saveConfig(cfg)
+                _ = runTool("/bin/launchctl", ["bootout", "gui/\(getuid())/\(AGENT_LABEL)"])
+                try? fm.removeItem(at: AGENT_URL)   // 舊的 LaunchAgent 清掉，避免重複啟動
+                say("AUTOSTART sm on=\(on) status=\(autoStartStatusText())")
+                return SMAppService.mainApp.status == .enabled || (!on && SMAppService.mainApp.status == .notRegistered)
+            } catch {
+                say("AUTOSTART sm fail=\(error.localizedDescription) → LaunchAgent 備援")
+            }
+        }
         if on {
             guard writeLaunchAgent() else { return false }
             _ = runTool("/bin/launchctl", ["bootout", "gui/\(getuid())/\(AGENT_LABEL)"])
@@ -2061,7 +2159,12 @@ extension AppDelegate {
     func guiSetRate(_ r: Double) {
         cfg.rate = r
         saveConfig(cfg)
-        for sw in screens where sw.player != nil && !cfg.paused { sw.player?.rate = Float(r) }
+        for sw in screens {
+            guard let p = sw.player else { continue }
+            p.defaultRate = Float(r)          // 之後 play() 也會用這個速度
+            if !cfg.paused { p.rate = Float(r) }
+        }
+        say("RATE \(r)")
     }
 
     func guiSetGravity(_ g: String) {
@@ -2193,6 +2296,7 @@ extension AppDelegate {
             w.title = T("設定")
         }
         buildStatusItem()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.ensureStatusItemVisible(attempt: 1) }
         say("UI-REBUILD lang=\(L10n.current.rawValue)")
     }
 
@@ -2218,6 +2322,22 @@ extension AppDelegate {
         libraryWindow?.makeKeyAndOrderFront(nil)
         libraryModel.refresh()
         say("LIBRARY-OPEN items=\(libraryModel.items.count)")
+    }
+
+    /// Dock 圖示右鍵選單（選單列被系統藏起來時的備援入口）
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let m = NSMenu()
+        let open = NSMenuItem(title: T("顯示壁紙庫"), action: #selector(showLibraryAction), keyEquivalent: "")
+        open.target = self
+        m.addItem(open)
+        let set = NSMenuItem(title: T("設定"), action: #selector(openWallpaperSettings), keyEquivalent: "")
+        set.target = self
+        m.addItem(set)
+        m.addItem(NSMenuItem.separator())
+        let pause = NSMenuItem(title: cfg.paused ? T("繼續播放") : T("暫停播放"), action: #selector(togglePause), keyEquivalent: "")
+        pause.target = self
+        m.addItem(pause)
+        return m
     }
 
     func windowWillClose(_ notification: Notification) {

@@ -30,8 +30,8 @@ final class WallpaperItem: Identifiable, ObservableObject {
         t = t.trimmingCharacters(in: .whitespaces)
         if t.range(of: #"^[0-9]+$"#, options: .regularExpression) != nil {
             switch kind {
-            case "video": return "影片 \(t)"
-            case "image": return "圖片 \(t)"
+            case "video": return T("影片") + " \(t)"
+            case "image": return T("圖片") + " \(t)"
             default: return t
             }
         }
@@ -90,7 +90,7 @@ func scanLibrary() -> [WallpaperItem] {
         let name = STATIC_THEME_NAMES[theme] ?? slug
         let rel = "@bundle:wallpapers/static/\(u.lastPathComponent)"
         out.append(WallpaperItem(id: "image:\(rel)", kind: "image", ref: rel,
-                                 title: "NASA・\(name)", subtitle: "精選靜態・公有領域", canDelete: false))
+                                 title: "NASA・\(name)", subtitle: T("精選靜態") + "・" + T("公有領域"), canDelete: false))
     }
     try? fm.createDirectory(at: LIBRARY_DIR, withIntermediateDirectories: true)
     if let items = try? fm.contentsOfDirectory(at: LIBRARY_DIR, includingPropertiesForKeys: nil) {
@@ -306,6 +306,7 @@ final class Engine: ObservableObject {
     func setInteractive(_ v: Bool) { app?.guiSetInteractive(v) }
     func setPaused(_ v: Bool) { app?.guiSetPaused(v) }
     func setAutoStart(_ v: Bool) { app?.guiSetAutoStart(v) }
+    func autoStartStatusText() -> String { app?.autoStartStatusText() ?? "off" }
     func setPoster(_ v: Bool) { app?.guiSetPoster(v) }
     func setParallax(_ on: Bool, _ amount: Double) { app?.guiSetParallax(on, amount) }
     func setRotation(_ on: Bool, _ minutes: Double) { app?.guiSetRotation(on, minutes) }
@@ -427,7 +428,7 @@ final class LibraryModel: ObservableObject {
         if fm.fileExists(atPath: textEdit.path) {
             NSWorkspace.shared.open([u], withApplicationAt: textEdit,
                                     configuration: NSWorkspace.OpenConfiguration())
-            message = "用文字編輯器打開 index.html，存檔就會即時更新"
+            message = T("用文字編輯器打開 index.html，存檔就會即時更新")
         } else {
             NSWorkspace.shared.open(u)
         }
@@ -472,7 +473,7 @@ final class LibraryModel: ObservableObject {
     func apply(_ it: WallpaperItem) {
         Engine.shared.apply(kind: it.kind, ref: it.ref)
         cfg = Engine.shared.config
-        message = "已套用「\(it.title)」到桌面"
+        message = "\(T("已套用"))「\(it.title)」"
     }
 
     func delete(_ it: WallpaperItem) {
@@ -480,7 +481,7 @@ final class LibraryModel: ObservableObject {
         var target = URL(fileURLWithPath: it.ref)
         if it.kind == "web" { target = target.deletingLastPathComponent() }
         try? fm.trashItem(at: target, resultingItemURL: nil)
-        message = "已把「\(it.title)」移到垃圾桶"
+        message = "\(T("已移到垃圾桶"))「\(it.title)」"
         if selectedID == it.id { selectedID = nil }
         refresh()
     }
@@ -494,7 +495,7 @@ final class LibraryModel: ObservableObject {
             try? fm.removeItem(at: dest)
             if (try? fm.copyItem(at: u, to: dest)) != nil { added += 1 }
         }
-        message = added > 0 ? "已加入 \(added) 個項目" : "沒有加入任何檔案"
+        message = added > 0 ? "\(T("已加入")) \(added) \(T("個項目"))" : T("沒有加入任何檔案")
         refresh()
     }
 
@@ -510,7 +511,7 @@ final class LibraryModel: ObservableObject {
         guard let app = Engine.shared.app else { return 0 }
         let n = app.doCopyTemplates().count
         refresh()
-        message = "已複製 \(n) 個可編輯範本"
+        message = "\(T("已複製")) \(n) \(T("個可編輯範本"))"
         return n
     }
 
@@ -623,9 +624,9 @@ struct ItemCard: View {
     private var kindBadge: String? {
         switch item.kind {
         case "video": return T("影片")
-        case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : "圖片"
+        case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : T("圖片")
         case "web": return "HTML"
-        case "builtin": return "內建"
+        case "builtin": return T("內建")
         default: return nil
         }
     }
@@ -707,7 +708,7 @@ struct ItemCard: View {
             }
             if let onDelete = onDelete {
                 Divider()
-                Button("刪除（移到垃圾桶）", role: .destructive) { onDelete() }
+                Button(T("刪除（移到垃圾桶）"), role: .destructive) { onDelete() }
             }
         }
     }
@@ -726,9 +727,9 @@ struct RowCard: View {
     private var badge: String {
         switch item.kind {
         case "video": return T("動態")
-        case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : "靜態"
+        case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : T("靜態")
         case "web": return "HTML"
-        default: return "內建"
+        default: return T("內建")
         }
     }
 
@@ -780,7 +781,7 @@ struct RowCard: View {
                     HStack {
                         Spacer()
                         Button(action: onApply) {
-                            Label("設為桌布", systemImage: "checkmark.circle.fill")
+                            Label(T("設為桌布"), systemImage: "checkmark.circle.fill")
                                 .font(.system(size: 10, weight: .semibold))
                         }
                         .buttonStyle(.borderedProminent)
@@ -1061,9 +1062,9 @@ struct LibraryView: View {
         guard let h = heroItem else { return "" }
         var bits: [String] = []
         switch h.kind {
-        case "video": bits.append("動態影片")
-        case "image": bits.append(h.ref.lowercased().hasSuffix(".gif") ? "GIF 動圖" : "靜態圖片")
-        case "web": bits.append("HTML 動態")
+        case "video": bits.append(T("動態影片"))
+        case "image": bits.append(h.ref.lowercased().hasSuffix(".gif") ? "GIF" : T("靜態圖片"))
+        case "web": bits.append(T("HTML 動態"))
         default: bits.append(T("內建動態"))
         }
         let sub = h.subtitle.trimmingCharacters(in: .whitespaces)
@@ -1133,9 +1134,9 @@ struct LibraryView: View {
         return VStack(spacing: 8) {
             Image(systemName: isFavEmpty ? "heart" : "sparkle.magnifyingglass")
                 .font(.system(size: 26)).foregroundColor(.secondary)
-            Text(isFavEmpty ? "還沒有最愛" : "找不到符合的壁紙")
+            Text(isFavEmpty ? T("還沒有最愛") : T("找不到符合的壁紙"))
                 .font(.system(size: 15, weight: .semibold))
-            Text(isFavEmpty ? "在卡片右下角按一下 ♡，就會收集到這裡" : "換個關鍵字，或把分類切回「全部」")
+            Text(isFavEmpty ? T("在卡片右下角按一下 ♡，就會收集到這裡") : T("換個關鍵字，或把分類切回「全部」"))
                 .font(.system(size: 12)).foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
@@ -1199,7 +1200,7 @@ struct LibraryView: View {
             HStack(spacing: 10) {
                 HStack(spacing: 9) {
                     Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
-                    TextField("搜尋…", text: $model.search)
+                    TextField(T("搜尋…"), text: $model.search)
                         .textFieldStyle(.plain).font(.system(size: 13))
                     if !model.search.isEmpty {
                         Button { model.search = "" } label: {
@@ -1222,7 +1223,7 @@ struct LibraryView: View {
                     Text(T("熱門:")).font(.system(size: 11)).foregroundColor(.secondary)
                     ForEach(model.hotWords, id: \.self) { w in
                         Button { model.search = w } label: {
-                            Text(w).font(.system(size: 11))
+                            Text(T(w)).font(.system(size: 11))
                                 .padding(.horizontal, 10).padding(.vertical, 5)
                                 .background(Capsule().fill(Color.white.opacity(0.06)))
                         }
@@ -1245,7 +1246,7 @@ struct LibraryView: View {
                                     .foregroundColor(c.2)
                                     .frame(width: 20, height: 20)
                                     .background(Circle().fill(c.2.opacity(0.18)))
-                                Text(c.0).font(.system(size: 12))
+                                Text(T(c.0)).font(.system(size: 12))
                             }
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(Capsule().fill(model.category == c.0 ? Color.white.opacity(0.13) : Color.white.opacity(0.04)))
@@ -1257,7 +1258,7 @@ struct LibraryView: View {
             }
             .tourAnchor("filters")
 
-            Text("\(model.pageItems.count) 段媒體・已載入 \(model.pageItems.count)")
+            Text("\(model.pageItems.count) " + T("段媒體") + "・" + T("已載入") + " \(model.pageItems.count)")
                 .font(.system(size: 11)).foregroundColor(.secondary)
 
             if model.pageItems.isEmpty {
@@ -1338,7 +1339,7 @@ struct GridCard: View {
                             .foregroundColor(fav ? Color(red: 1, green: 0.35, blue: 0.5) : .white.opacity(0.75))
                             .contentShape(Rectangle())
                             .onTapGesture { onFav() }
-                            .help(fav ? "取消最愛" : "加入最愛")
+                            .help(fav ? T("取消最愛") : T("加入最愛"))
                     }
                     .padding(.horizontal, 10).padding(.bottom, 9)
                 }
@@ -1365,17 +1366,17 @@ struct GridCard: View {
         .onHover { hover = $0 }
         .contextMenu {
             Button(T("在 Finder 顯示")) { onReveal() }
-            Button(fav ? "取消最愛" : "加入最愛") { onFav() }
+            Button(fav ? T("取消最愛") : T("加入最愛")) { onFav() }
         }
         .task(id: item.id) { res = await Resolution.label(item) }
     }
 
     private var kindLabel: String {
         switch item.kind {
-        case "video": return "動態"
-        case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : "靜態"
+        case "video": return T("動態")
+        case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : T("靜態")
         case "web": return "HTML"
-        default: return "內建"
+        default: return T("內建")
         }
     }
 }

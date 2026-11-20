@@ -62,7 +62,7 @@ echo "==> 編譯 Swift 主程式 + 圖形介面"
 swiftc -swift-version 5 -O \
   -import-objc-header "$SRC/bridge.h" \
   -o "$BUILD/$APP/Contents/MacOS/$BIN" \
-  "$SRC/main.swift" "$SRC/gui.swift" "$SRC/tour.swift" "$SRC/settings.swift" "$SRC/l10n.swift" "$SRC/firstrun.swift" "$BUILD/bridge.o" \
+  "$SRC/main.swift" "$SRC/gui.swift" "$SRC/tour.swift" "$SRC/settings.swift" "$SRC/l10n.swift" "$SRC/firstrun.swift" "$SRC/update.swift" "$BUILD/bridge.o" \
   -framework Cocoa -framework AVFoundation -framework WebKit -framework SwiftUI \
   -framework UniformTypeIdentifiers
 
@@ -88,6 +88,14 @@ if [ -d "$RES/lang" ]; then cp -R "$RES/lang" "$BUILD/$APP/Contents/Resources/";
 if [ -d "$RES/posters" ]; then cp -R "$RES/posters" "$BUILD/$APP/Contents/Resources/"; fi
 if [ -f "$RES/AppIcon.icns" ]; then cp "$RES/AppIcon.icns" "$BUILD/$APP/Contents/Resources/"; fi
 cp "$ROOT/Info.plist" "$BUILD/$APP/Contents/Info.plist"
+# 版本單一來源：VERSION 檔 → Info.plist（App 顯示與 GitHub Release 同步）
+VER="$(cat "$ROOT/VERSION" 2>/dev/null | tr -d '[:space:]')"
+if [ -n "$VER" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VER" "$BUILD/$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+  BUILDNO="$(echo "$VER" | tr -d '.')"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILDNO" "$BUILD/$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+  echo "  ==> 版本 $VER"
+fi
 
 echo "==> 簽章（ad-hoc）"
 codesign --force --deep --sign - "$BUILD/$APP" >/dev/null 2>&1 || echo "（簽章失敗，仍可嘗試執行）"
