@@ -1,4 +1,4 @@
-# DynWall
+# DynWall — Live Wallpaper for macOS
 
 <p>
   <a href="https://github.com/shimianyizhimiao/macos-live-wallpaper/releases/latest">

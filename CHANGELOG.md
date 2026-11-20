@@ -1,5 +1,21 @@
 # 更新紀錄
 
+## v0.9.9
+
+### 語言：28 種，下拉選單，設定會同步
+
+- 設定 → 一般 → **語言**：改成下拉清單（可捲動），列出 28 種語言的原生名稱，打勾的是目前語言
+- 語言值直接讀 `L10n.current`（不是設定頁的暫存副本），所以主視窗、設定頁、歡迎頁永遠同步
+- 第一次啟動的歡迎頁同樣是**可捲動**的 28 種語言清單，並自動偵測系統語言打勾
+- 新增 `resources/lang/*.json`：英文、簡中為完整 130 條；日／韓／西／法／德／義／葡／俄／烏／波／荷／土／越／泰／印尼／馬來／阿／印地／希伯來／瑞典／丹麥／挪威／芬蘭／捷克／希臘 為核心 32 條（其餘回退英文）
+
+### GitHub 讓搜尋找得到
+
+- repo 改名 `dynamwall` → **`macos-live-wallpaper`**（舊網址會 404，已全部改連結）
+- repo 描述加上「免費開源的 macOS 動態壁紙 / live wallpaper」，topics：macos、wallpaper、live-wallpaper、dynamic-wallpaper、desktop-wallpaper、video-wallpaper、swift、swiftui、appkit
+- README 標題改成「DynWall — macOS 動態壁紙 · Live Wallpaper」
+- 新官網：https://shimianyizhimiao.github.io/macos-live-wallpaper/
+
 ## v0.9.8
 
 ### 介面語言（繁中／簡中／英文）

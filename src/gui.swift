@@ -860,7 +860,7 @@ struct LibraryView: View {
             Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
 
             VStack(spacing: 0) {
-                navBar
+                if !showWelcome { navBar }
                 ScrollView {
                     if model.page == .home {
                         homeContent

@@ -1,4 +1,4 @@
-# 動態壁紙 · DynWall
+# DynWall — macOS 動態壁紙 · Live Wallpaper
 
 <p>
   <a href="https://github.com/shimianyizhimiao/macos-live-wallpaper/releases/latest">
@@ -11,7 +11,7 @@
 
 **不想看程式碼，只想用？** → **[下載 DynWall.dmg](https://github.com/shimianyizhimiao/macos-live-wallpaper/releases/latest)**，打開、把 App 拖進 Applications、第一次啟動先選語言就好（macOS 13+，Apple Silicon / Intel）。
 
-**僅限 macOS** · macOS 13+ · Apple Silicon 與 Intel · Swift + AppKit · 無第三方依賴
+**免費、開源、免編譯下載** · **僅限 macOS** · macOS 13+ · Apple Silicon 與 Intel · Swift + AppKit · 無第三方依賴
 
 > ⚠️ **個人專案，可能還有一些 BUG。** 只在 macOS 26.4 / Apple Silicon 實測過。
 > 遇到問題請開 Issue，並附上你的 macOS 版本與 `~/Library/Logs/動態壁紙.log`。
