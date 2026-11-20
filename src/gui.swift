@@ -82,7 +82,7 @@ func scanLibrary() -> [WallpaperItem] {
     for id in builtinIDs() {
         out.append(WallpaperItem(id: "builtin:\(id)", kind: "builtin", ref: id,
                                  title: BUILTIN_TITLES[id] ?? id,
-                                 subtitle: "內建動態壁紙", canDelete: false))
+                                 subtitle: T("內建動態壁紙"), canDelete: false))
     }
     for u in builtinStaticFiles() {
         let slug = u.deletingPathExtension().lastPathComponent
@@ -103,24 +103,24 @@ func scanLibrary() -> [WallpaperItem] {
                 let idx = u.appendingPathComponent("index.html")
                 if fm.fileExists(atPath: idx.path) {
                     out.append(WallpaperItem(id: "web:\(idx.path)", kind: "web", ref: idx.path,
-                                             title: name, subtitle: "HTML 動畫", canDelete: true))
+                                             title: name, subtitle: T("HTML 動畫"), canDelete: true))
                 }
             } else {
                 let ext = u.pathExtension.lowercased()
                 if VIDEO_EXTS.contains(ext) {
                     let mb = (try? fm.attributesOfItem(atPath: u.path)[.size] as? Int).flatMap { $0 }.map { Double($0) / 1_048_576 } ?? 0
                     out.append(WallpaperItem(id: "video:\(u.path)", kind: "video", ref: u.path,
-                                             title: name, subtitle: String(format: "影片・%.0f MB", mb), canDelete: true))
+                                             title: name, subtitle: String(format: T("影片・%.0f MB"), mb), canDelete: true))
                 } else if IMAGE_EXTS.contains(ext) {
                     out.append(WallpaperItem(id: "image:\(u.path)", kind: "image", ref: u.path,
-                                             title: name, subtitle: "圖片・\(ext.uppercased())", canDelete: true))
+                                             title: name, subtitle: "\(T("圖片"))・\(ext.uppercased())", canDelete: true))
                 }
             }
         }
     }
     for e in customEntries() where !out.contains(where: { $0.ref == e.path }) {
         out.append(WallpaperItem(id: "web:\(e.path)", kind: "web", ref: e.path,
-                                 title: e.title, subtitle: "我的 HTML", canDelete: false))
+                                 title: e.title, subtitle: T("我的 HTML"), canDelete: false))
     }
     return out
 }
@@ -165,7 +165,7 @@ final class Thumbnailer {
 
     private func imageInfo(_ u: URL) -> String {
         guard let rep = NSImageRep(contentsOf: u) else { return "圖片" }
-        return "圖片・\(rep.pixelsWide)×\(rep.pixelsHigh)"
+        return "\(T("圖片"))・\(rep.pixelsWide)×\(rep.pixelsHigh)"
     }
 
     private func videoThumb(_ url: URL, size: CGSize, done: @escaping (NSImage?, String?) -> Void) {
@@ -217,7 +217,7 @@ final class Thumbnailer {
             sem.signal()
         }
         sem.wait()
-        return "影片・\(Int(dur)) 秒・\(res)"
+        return "\(T("影片"))・\(Int(dur)) \(T("秒"))・\(res)"
     }
 
     private func webSnapshot(_ url: URL, size: CGSize, done: @escaping (NSImage?, String?) -> Void) {
@@ -312,6 +312,7 @@ final class Engine: ObservableObject {
     func setPauseOnFullscreen(_ on: Bool) { app?.guiSetPauseOnFullscreen(on) }
     func setLockPoster(_ on: Bool) { app?.guiSetLockPoster(on) }
     func setLockVideo(_ on: Bool) { app?.guiSetLockVideo(on) }
+    func pickLanguage(_ raw: String) { app?.pickLanguage(raw) }
     var lockVideoProgress: String { app?.lockVideoProgress ?? "" }
 }
 
@@ -620,7 +621,7 @@ struct ItemCard: View {
 
     private var kindBadge: String? {
         switch item.kind {
-        case "video": return "影片"
+        case "video": return T("影片")
         case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : "圖片"
         case "web": return "HTML"
         case "builtin": return "內建"
@@ -657,7 +658,7 @@ struct ItemCard: View {
             }
             .overlay(alignment: .topTrailing) {
                 if current {
-                    Text("使用中")
+                    Text(T("使用中"))
                         .font(.system(size: 10, weight: .bold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color.accentColor)
@@ -668,7 +669,7 @@ struct ItemCard: View {
             }
             .overlay(alignment: .bottom) {
                 if hover && !current {
-                    Text("設為桌布")
+                    Text(T("設為桌布"))
                         .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(.black.opacity(0.6))
@@ -678,7 +679,7 @@ struct ItemCard: View {
                         .transition(.opacity)
                 }
             }
-            Text(item.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            Text(T(item.title)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
             Text(item.subtitle).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
         }
         .padding(8)
@@ -697,11 +698,11 @@ struct ItemCard: View {
         .onTapGesture(count: 2) { onApply() }
         .onTapGesture(count: 1) { onTap() }
         .contextMenu {
-            Button("套用到桌面") { onApply() }
+            Button(T("套用到桌面")) { onApply() }
                 .disabled(current)
-            Button("在 Finder 顯示") { onReveal() }
+            Button(T("在 Finder 顯示")) { onReveal() }
             if let onEdit = onEdit {
-                Button("編輯 HTML…") { onEdit() }
+                Button(T("編輯 HTML…")) { onEdit() }
             }
             if let onDelete = onDelete {
                 Divider()
@@ -723,7 +724,7 @@ struct RowCard: View {
 
     private var badge: String {
         switch item.kind {
-        case "video": return "動態"
+        case "video": return T("動態")
         case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : "靜態"
         case "web": return "HTML"
         default: return "內建"
@@ -747,7 +748,7 @@ struct RowCard: View {
             LinearGradient(colors: [.black.opacity(0.85), .clear], startPoint: .bottom, endPoint: .center)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title).font(.system(size: 12, weight: .semibold))
+                Text(T(item.title)).font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white).lineLimit(1)
                 Text(item.subtitle).font(.system(size: 9))
                     .foregroundColor(.white.opacity(0.7)).lineLimit(1)
@@ -763,7 +764,7 @@ struct RowCard: View {
                         .foregroundColor(.white)
                         .cornerRadius(4)
                     if current {
-                        Text("使用中")
+                        Text(T("使用中"))
                             .font(.system(size: 9, weight: .bold))
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Color.accentColor)
@@ -799,8 +800,8 @@ struct RowCard: View {
         .onHover { hover = $0 }
         .onTapGesture { onTap() }
         .contextMenu {
-            Button("套用到桌面") { onApply() }.disabled(current)
-            Button("在 Finder 顯示") { onReveal() }
+            Button(T("套用到桌面")) { onApply() }.disabled(current)
+            Button(T("在 Finder 顯示")) { onReveal() }
         }
     }
 }
@@ -810,6 +811,7 @@ struct LibraryView: View {
     @ObservedObject var tour = TourState.shared
     @State private var heroIndex = 0
     @State private var heroPaused = false
+    @State private var showWelcome = false
 
     private let heroTimer = Timer.publish(every: 6.0, on: .main, in: .common).autoconnect()
     private let gridColumns = [GridItem(.adaptive(minimum: 215), spacing: 14)]
@@ -836,18 +838,18 @@ struct LibraryView: View {
     private var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
         switch h {
-        case 5..<12: return "早安"
-        case 12..<18: return "午安"
-        default: return "晚安"
+        case 5..<12: return T("早安")
+        case 12..<18: return T("午安")
+        default: return T("晚安")
         }
     }
 
     private var pageTitle: String {
         switch model.page {
-        case .home: return "探索壁紙庫"
-        case .still: return "靜態壁紙"
-        case .motion: return "動態壁紙"
-        case .mine: return "我的最愛"
+        case .home: return T("探索壁紙庫")
+        case .still: return T("靜態壁紙")
+        case .motion: return T("動態壁紙")
+        case .mine: return T("我的最愛")
         }
     }
 
@@ -868,6 +870,10 @@ struct LibraryView: View {
                 }
             }
 
+            if showWelcome { WelcomeOverlay { lang in
+                showWelcome = false
+                Engine.shared.pickLanguage(lang.rawValue)
+            } }
             if tour.active { TourOverlay(tour: tour) }
         }
         .coordinateSpace(name: "dynwall-window")
@@ -875,6 +881,7 @@ struct LibraryView: View {
             DispatchQueue.main.async { tour.rects = r }
         }
         .onAppear {
+            showWelcome = !Engine.shared.config.langChosen
             model.refresh()
             if model.selectedID == nil { model.selectedID = model.items.first?.id }
             tour.startIfNeeded()
@@ -898,7 +905,7 @@ struct LibraryView: View {
                         }
                         dbg("UI page=\(p.rawValue) items=\(model.pageItems.count)")
                     } label: {
-                        Text(p.rawValue)
+                        Text(T(p.rawValue))
                             .font(.system(size: 12.5, weight: model.page == p ? .semibold : .regular))
                             .foregroundColor(model.page == p ? .primary : .secondary)
                             .padding(.horizontal, 18).padding(.vertical, 7)
@@ -913,12 +920,12 @@ struct LibraryView: View {
 
             HStack(spacing: 8) {
                 Menu {
-                    Button("加入檔案…（影片 / 圖片 / GIF / HTML）") { model.pickFiles() }
-                    Button("匯入 Wallpaper Engine 網頁壁紙…") {
+                    Button(T("加入檔案…（影片 / 圖片 / GIF / HTML）")) { model.pickFiles() }
+                    Button(T("匯入 Wallpaper Engine 網頁壁紙…")) {
                         NSApp.sendAction(#selector(AppDelegate.importWEAction), to: nil, from: nil)
                     }
                     Divider()
-                    Button("開啟壁紙庫資料夾") { model.openLibraryFolder() }
+                    Button(T("開啟壁紙庫資料夾")) { model.openLibraryFolder() }
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 13, weight: .semibold))
@@ -928,24 +935,24 @@ struct LibraryView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .frame(width: 34, height: 34)
-                .help("加入壁紙")
+                .help(T("加入壁紙"))
                 .tourAnchor("add")
 
                 Spacer()
 
                 Button { surprise() } label: {
-                    Label("猜你喜歡", systemImage: "sparkles")
+                    Label(T("猜你喜歡"), systemImage: "sparkles")
                         .font(.system(size: 12, weight: .medium))
                         .padding(.horizontal, 12).padding(.vertical, 8)
                         .background(Capsule().fill(.ultraThinMaterial))
                 }
                 .buttonStyle(.plain)
-                .help("隨機挑一張套用")
+                .help(T("隨機挑一張套用"))
 
-                roundIcon("questionmark") { tour.replay() }.help("使用導覽")
+                roundIcon("questionmark") { tour.replay() }.help(T("使用導覽"))
                 roundIcon("gearshape") {
                     NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
-                }.help("設定（⌘,）")
+                }.help(T("設定（⌘,）"))
             }
         }
         .padding(.horizontal, 16)
@@ -996,8 +1003,8 @@ struct LibraryView: View {
                                startPoint: .bottomLeading, endPoint: .center)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("精選").font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.65))
-                    Text(heroItem?.title ?? "還沒有壁紙")
+                    Text(T("精選")).font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.65))
+                    Text(T(heroItem?.title ?? T("還沒有壁紙")))
                         .font(.system(size: 42, weight: .bold, design: .serif))
                         .foregroundColor(.white).lineLimit(1)
                     Text(metaLine).font(.system(size: 12)).foregroundColor(.white.opacity(0.7))
@@ -1006,7 +1013,7 @@ struct LibraryView: View {
                         Button {
                             if let h = heroItem { model.apply(h) }
                         } label: {
-                            Label(model.selected.map { model.isCurrent($0) } == true ? "使用中" : "套用到桌面",
+                            Label(model.selected.map { model.isCurrent($0) } == true ? T("使用中") : T("套用到桌面"),
                                   systemImage: "play.fill")
                                 .font(.system(size: 13, weight: .semibold))
                                 .padding(.horizontal, 6).padding(.vertical, 3)
@@ -1019,7 +1026,7 @@ struct LibraryView: View {
                         Button {
                             if let h = heroItem { model.reveal(h) }
                         } label: {
-                            Label("在 Finder 顯示", systemImage: "folder").font(.system(size: 12))
+                            Label(T("在 Finder 顯示"), systemImage: "folder").font(.system(size: 12))
                         }
                         .buttonStyle(.bordered).controlSize(.large)
                     }
@@ -1056,7 +1063,7 @@ struct LibraryView: View {
         case "video": bits.append("動態影片")
         case "image": bits.append(h.ref.lowercased().hasSuffix(".gif") ? "GIF 動圖" : "靜態圖片")
         case "web": bits.append("HTML 動態")
-        default: bits.append("內建動態")
+        default: bits.append(T("內建動態"))
         }
         let sub = h.subtitle.trimmingCharacters(in: .whitespaces)
         if !sub.isEmpty && !sub.hasPrefix(bits[0]) && !bits[0].hasPrefix(sub) { bits.append(sub) }
@@ -1103,12 +1110,12 @@ struct LibraryView: View {
                 if featured.isEmpty {
                     emptyState
                 } else {
-                    shelf("篩選結果", model.filtered)
+                    shelf(T("篩選結果"), model.filtered)
                 }
             } else {
-                shelf("最新壁紙", latest)
-                if !builtins.isEmpty { shelf("精選動態壁紙", builtins) }
-                if !mine.isEmpty { shelf("我的壁紙", mine) }
+                shelf(T("最新壁紙"), latest)
+                if !builtins.isEmpty { shelf(T("精選動態壁紙"), builtins) }
+                if !mine.isEmpty { shelf(T("我的壁紙"), mine) }
             }
         }
         .padding(.vertical, 22)
@@ -1141,7 +1148,7 @@ struct LibraryView: View {
                 Image(systemName: "chevron.right.circle.fill")
                     .font(.system(size: 13)).foregroundColor(.secondary)
                 Spacer()
-                Text("\(items.count) 張").font(.system(size: 10)).foregroundColor(.secondary)
+                Text("\(items.count) \(T("張"))").font(.system(size: 10)).foregroundColor(.secondary)
             }
             .padding(.horizontal, 28)
 
@@ -1203,15 +1210,15 @@ struct LibraryView: View {
                 .background(Capsule().fill(Color.white.opacity(0.06)))
                 .overlay(Capsule().stroke(Color.white.opacity(0.09)))
 
-                roundIcon("link") { model.openLibraryFolder() }.help("開啟壁紙庫資料夾")
-                roundIcon("sparkles") { surprise() }.help("隨機挑一張")
-                roundIcon("arrow.clockwise") { model.refresh() }.help("重新掃描")
+                roundIcon("link") { model.openLibraryFolder() }.help(T("開啟壁紙庫資料夾"))
+                roundIcon("sparkles") { surprise() }.help(T("隨機挑一張"))
+                roundIcon("arrow.clockwise") { model.refresh() }.help(T("重新掃描"))
             }
 
             // 熱門
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    Text("熱門:").font(.system(size: 11)).foregroundColor(.secondary)
+                    Text(T("熱門:")).font(.system(size: 11)).foregroundColor(.secondary)
                     ForEach(model.hotWords, id: \.self) { w in
                         Button { model.search = w } label: {
                             Text(w).font(.system(size: 11))
@@ -1310,7 +1317,7 @@ struct GridCard: View {
                 }
                 .overlay(alignment: .topLeading) {
                     if current {
-                        Text("使用中")
+                        Text(T("使用中"))
                             .font(.system(size: 9, weight: .bold))
                             .padding(.horizontal, 7).padding(.vertical, 3)
                             .background(Capsule().fill(Color.accentColor))
@@ -1356,7 +1363,7 @@ struct GridCard: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .contextMenu {
-            Button("在 Finder 顯示") { onReveal() }
+            Button(T("在 Finder 顯示")) { onReveal() }
             Button(fav ? "取消最愛" : "加入最愛") { onFav() }
         }
         .task(id: item.id) { res = await Resolution.label(item) }
@@ -1397,6 +1404,55 @@ enum Resolution {
             return "HTML"
         default:
             return "內建"
+        }
+    }
+}
+
+// MARK: - 第一次啟動的語言選擇（蓋在視窗上，不靠浮動視窗）
+
+struct WelcomeOverlay: View {
+    let onPick: (AppLang) -> Void
+    @State private var hovered: AppLang?
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
+            Color.black.opacity(0.35).ignoresSafeArea()
+
+            VStack(spacing: 22) {
+                VStack(spacing: 8) {
+                    Text("DynWall").font(.system(size: 34, weight: .bold))
+                    Text("選擇語言 · Choose your language")
+                        .font(.system(size: 13)).foregroundColor(.secondary)
+                }
+
+                VStack(spacing: 10) {
+                    ForEach(AppLang.allCases) { lang in
+                        Button { onPick(lang) } label: {
+                            HStack {
+                                Text(lang.label).font(.system(size: 15, weight: .medium))
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 18).padding(.vertical, 14)
+                            .background(RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.primary.opacity(hovered == lang ? 0.16 : 0.08)))
+                            .overlay(RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.primary.opacity(hovered == lang ? 0.35 : 0.12)))
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { hovered = $0 ? lang : nil }
+                    }
+                }
+                .frame(width: 300)
+
+                Text("之後可以在「設定 → 一般」更改 · Change later in Settings")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+            }
+            .padding(34)
+            .background(RoundedRectangle(cornerRadius: 20).fill(.regularMaterial))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.10)))
         }
     }
 }

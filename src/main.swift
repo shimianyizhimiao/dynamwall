@@ -88,11 +88,13 @@ struct Config: Codable {
     var pauseOnFullscreen = true   // 有 App 全螢幕時暫停壁紙，省電
     var lockPoster = true          // 鎖定／登入畫面要看到當下這一格（系統桌布一定得是靜態圖）
     var lockVideoOn = false        // 鎖定畫面跟著桌面一起播同一支影片（自動同步）
+    var lang = "zh-Hant"           // 介面語言：zh-Hant / zh-Hans / en
+    var langChosen = false         // 第一次啟動是否已經選過語言
 
     init() {}
 
     enum CodingKeys: String, CodingKey {
-        case kind, ref, mute, rate, gravity, dim, interactive, paused, autoStart, poster, parallaxOn, parallax, rotationOn, rotationMinutes, pauseOnFullscreen, lockPoster, lockVideoOn
+        case kind, ref, mute, rate, gravity, dim, interactive, paused, autoStart, poster, parallaxOn, parallax, rotationOn, rotationMinutes, pauseOnFullscreen, lockPoster, lockVideoOn, lang, langChosen
     }
 
     init(from decoder: Decoder) throws {
@@ -114,7 +116,19 @@ struct Config: Codable {
         pauseOnFullscreen = (try? c.decode(Bool.self, forKey: .pauseOnFullscreen)) ?? true
         lockPoster = (try? c.decode(Bool.self, forKey: .lockPoster)) ?? true
         lockVideoOn = (try? c.decode(Bool.self, forKey: .lockVideoOn)) ?? false
+        lang = (try? c.decode(String.self, forKey: .lang)) ?? "zh-Hant"
+        langChosen = (try? c.decode(Bool.self, forKey: .langChosen)) ?? false
     }
+}
+
+/// 換語言後重開（UI 全部重新建立，最乾淨）
+func relaunch() {
+    let path = Bundle.main.bundleURL.path
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    p.arguments = ["-n", path]
+    try? p.run()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { NSApp.terminate(nil) }
 }
 
 func ensureDirs() {
@@ -1070,6 +1084,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             say("SEED-PRESET \(preset.lastPathComponent)")
         }
         cfg = loadConfig()
+        L10n.current = AppLang(rawValue: cfg.lang) ?? .zhHant
+        say("LANG \(cfg.lang) chosen=\(cfg.langChosen)")
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .suddenTerminationDisabled],
                                                         reason: "動態壁紙持續播放")
         buildStatusItem()
@@ -1097,6 +1113,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         if let i = args.firstIndex(of: "--cycle-test"), i + 1 < args.count, let period = Double(args[i + 1]) {
             startCycleTest(period: period)
+        }
+        if CommandLine.arguments.contains("--open-settings") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
+            }
         }
         if CommandLine.arguments.contains("--gui-test") {
             runGUITest()
@@ -2159,7 +2180,7 @@ extension AppDelegate {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 700),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
                              backing: .buffered, defer: false)
-            w.title = "動態壁紙庫"
+            w.title = T("壁紙庫")
             w.isReleasedWhenClosed = false
             w.isOpaque = false                     // 玻璃質感：讓背景用材質透出桌面
             w.backgroundColor = .clear
@@ -2518,6 +2539,15 @@ extension AppDelegate {
         }
     }
 
+    func pickLanguage(_ raw: String) {
+        var c = loadConfig()
+        c.lang = raw
+        c.langChosen = true
+        saveConfig(c)
+        say("LANG picked=\(raw)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { relaunch() }
+    }
+
     func guiSetLockVideo(_ on: Bool) {
         if on { lockVideoInteractive = true }
         cfg.lockVideoOn = on
@@ -2739,7 +2769,7 @@ extension AppDelegate {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 440),
                              styleMask: [.titled, .closable],
                              backing: .buffered, defer: false)
-            w.title = "動態壁紙 設定"
+            w.title = T("設定")
             w.isReleasedWhenClosed = false
             // 一定要能跟著使用者跑到目前這個 Space，不然會「看起來沒開」
             w.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]

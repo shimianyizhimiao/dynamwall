@@ -1,4 +1,16 @@
-# 動態壁紙 · DynWall
+# DynWall
+
+<p>
+  <a href="https://github.com/shimianyizhimiao/dynamwall/releases/latest">
+    <img alt="Download for macOS" src="https://img.shields.io/badge/⬇_Download-DynWall.dmg-2ea44f?style=for-the-badge&logo=apple&logoColor=white" height="42">
+  </a>
+  <a href="https://shimianyizhimiao.github.io/dynamwall/">
+    <img alt="Website" src="https://img.shields.io/badge/Website-shimianyizhimiao.github.io-3b82f6?style=for-the-badge" height="42">
+  </a>
+</p>
+
+**Just want to use it?** → **[Download DynWall.dmg](https://github.com/shimianyizhimiao/dynamwall/releases/latest)**, open it, drag the app to Applications, pick your language on first launch (macOS 13+, Apple silicon / Intel).
+
 
 **macOS only** · macOS 13+ · Apple Silicon & Intel · Swift + AppKit · no third-party dependencies
 
