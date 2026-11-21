@@ -1,5 +1,16 @@
 # 更新紀錄
 
+## v0.9.17
+
+### 修：關掉壁紙庫之後要繼續在背景跑
+
+- 明確實作 `applicationShouldTerminateAfterLastWindowClosed = false`：關掉最後一個視窗**不會結束 App**，壁紙繼續播（記錄 `BACKGROUND keep-running`、`LIBRARY-CLOSE 背景繼續播放 screens=1 playing=1`）
+- 「關掉 App 後保留桌面」預設打開：按 ⌘Q 真結束時，桌面留下最後一格畫面，不會跳回系統桌布（記錄 `POSTER-ON-QUIT`）
+
+實測：
+- 關視窗 → 程序還在、桌面畫面兩秒內持續變化（不是定格）
+- ⌘Q → `POSTER-ON-QUIT reuse`，桌面仍是壁紙那一格，不是 DefaultDesktop.heic
+
 ## v0.9.16
 
 ### 標籤改成「點一下選」＋自訂

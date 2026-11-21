@@ -2357,6 +2357,11 @@ extension AppDelegate {
     }
 
     // 已經在執行時，使用者又雙擊 App／按 Dock 圖示 → 把壁紙庫視窗叫出來
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        say("BACKGROUND keep-running 視窗全關，App 繼續在背景播放")
+        return false
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         // 設定窗開著時（例如在 Dock 點一下 App）不要把壁紙庫又叫到設定窗上面
         if let s = settingsWindow, s.isVisible {
@@ -2479,7 +2484,7 @@ extension AppDelegate {
 
     func windowWillClose(_ notification: Notification) {
         if (notification.object as? NSWindow) === libraryWindow {
-            say("LIBRARY-CLOSE（Dock 圖示保留，右鍵可再開）")
+            say("LIBRARY-CLOSE 背景繼續播放 screens=\(screens.count) playing=\(screens.filter { $0.player?.timeControlStatus == .playing }.count)")
         }
     }
 
