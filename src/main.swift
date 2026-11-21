@@ -1237,10 +1237,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if CommandLine.arguments.contains("--meta-test") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                 if let it = self.libraryModel.items.first(where: { $0.kind == "video" }) {
-                    self.libraryModel.saveMeta(it, title: "測試名稱", tags: "甲, 乙")
+                    self.libraryModel.saveMeta(it, title: "測試名稱", tagList: ["甲", "乙"])
                     let f = SUPPORT_DIR.appendingPathComponent("meta.json")
                     let txt = (try? String(contentsOf: f, encoding: String.Encoding.utf8)) ?? "nil"
                     dbg("META-TEST id=\(it.id) file=\(txt.prefix(200))")
+                }
+            }
+        }
+        if CommandLine.arguments.contains("--tags-test") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                if let it = self.libraryModel.items.first(where: { $0.kind == "video" }) {
+                    self.libraryModel.beginEdit(it, .tags)
+                    dbg("TAGS-TEST open id=\(it.id) existing=\(self.libraryModel.allTags.count)")
                 }
             }
         }

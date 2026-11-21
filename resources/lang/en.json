@@ -213,5 +213,7 @@
  "都選填。名字只影響顯示，不會改到檔案。": "Both optional. The name only changes what you see — the file is untouched.",
  "標籤可以用搜尋列找，卡片上會顯示前兩個。": "Tags are searchable; the first two show on the card.",
  "儲存": "Save",
- "取消": "Cancel"
+ "取消": "Cancel",
+ "輸入標籤…": "Enter a tag…",
+ "加入": "Add"
 }

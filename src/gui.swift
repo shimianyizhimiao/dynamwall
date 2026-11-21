@@ -367,9 +367,15 @@ final class LibraryModel: ObservableObject {
         editingItem = it
     }
 
-    func saveMeta(_ it: WallpaperItem, title: String, tags: String) {
-        let list = tags.split(whereSeparator: { $0 == "," || $0 == "，" || $0 == " " || $0 == "#" })
-            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    /// 全部用過的標籤（依使用次數排序），給「點一下選」用
+    var allTags: [String] {
+        var counts: [String: Int] = [:]
+        for it in items { for t in it.tags { counts[t, default: 0] += 1 } }
+        return counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.map { $0.key }
+    }
+
+    func saveMeta(_ it: WallpaperItem, title: String, tagList: [String]) {
+        let list = tagList.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         MetaStore.set(it.id, title: title, tags: list)
         it.customTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : title
         it.tags = list
@@ -905,8 +911,8 @@ struct LibraryView: View {
             if tour.active { TourOverlay(tour: tour) }
         }
         .sheet(item: $model.editingItem) { it in
-            EditItemSheet(item: it, mode: model.editMode) { n, t in
-                model.saveMeta(it, title: n, tags: t)
+            EditItemSheet(item: it, mode: model.editMode, existingTags: model.allTags) { n, list in
+                model.saveMeta(it, title: n, tagList: list)
             }
         }
         .coordinateSpace(name: "dynwall-window")
@@ -1441,10 +1447,21 @@ struct GridCard: View {
 struct EditItemSheet: View {
     @ObservedObject var item: WallpaperItem
     let mode: LibraryModel.EditMode
-    let onSave: (String, String) -> Void
+    let existingTags: [String]
+    let onSave: (String, [String]) -> Void
     @Environment(\.dismiss) private var dismiss
+
     @State private var name = ""
-    @State private var tags = ""
+    @State private var selected: [String] = []
+    @State private var adding = false
+    @State private var newTag = ""
+    @FocusState private var newTagFocused: Bool
+
+    private var allChips: [String] {
+        var list = existingTags
+        for t in selected where !list.contains(t) { list.append(t) }
+        return list
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1459,10 +1476,26 @@ struct EditItemSheet: View {
                     .textFieldStyle(.roundedBorder).font(.system(size: 12))
             }
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text(T("標籤（用逗號分隔）")).font(.system(size: 11, weight: .medium))
-                TextField(T("例：賽博, 夜景, 4K"), text: $tags)
-                    .textFieldStyle(.roundedBorder).font(.system(size: 12))
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Text(T("標籤")).font(.system(size: 11, weight: .medium))
+                    Text(T("點一下選取，＋ 可以自己加"))
+                        .font(.system(size: 9.5)).foregroundColor(.secondary)
+                    Spacer()
+                }
+
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 74), spacing: 6, alignment: .leading)],
+                              alignment: .leading, spacing: 6) {
+                        ForEach(allChips, id: \.self) { t in
+                            chip(t)
+                        }
+                        addChip
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: 132)
+
                 Text(T("標籤可以用搜尋列找，卡片上會顯示前兩個。"))
                     .font(.system(size: 9.5)).foregroundColor(.secondary)
             }
@@ -1470,16 +1503,92 @@ struct EditItemSheet: View {
             HStack {
                 Spacer()
                 Button(T("取消")) { dismiss() }
-                Button(T("儲存")) { onSave(name, tags); dismiss() }
+                Button(T("儲存")) { onSave(name, selected); dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
-        .frame(width: 400)
+        .frame(width: 430)
         .onAppear {
             name = item.customTitle ?? ""
-            tags = item.tags.joined(separator: ", ")
+            selected = item.tags
         }
+    }
+
+    private func chip(_ t: String) -> some View {
+        let on = selected.contains(t)
+        return Button {
+            if on { selected.removeAll { $0 == t } } else { selected.append(t) }
+        } label: {
+            HStack(spacing: 4) {
+                if on { Image(systemName: "checkmark").font(.system(size: 8, weight: .bold)) }
+                Text("#" + t).font(.system(size: 11, weight: on ? .semibold : .regular))
+            }
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(Capsule().fill(on ? Color.accentColor.opacity(0.85) : Color.primary.opacity(0.06)))
+            .foregroundColor(on ? .white : .primary)
+            .overlay(Capsule().stroke(on ? Color.clear : Color.primary.opacity(0.12), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var addChip: some View {
+        HStack(spacing: 5) {
+            if adding {
+                HStack(spacing: 4) {
+                    Image(systemName: "number").font(.system(size: 8)).foregroundColor(.secondary)
+                    TextField(T("輸入標籤…"), text: $newTag)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                        .frame(width: 96)
+                        .focused($newTagFocused)
+                        .onSubmit { commitNewTag() }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(Color.primary.opacity(0.07)))
+                .overlay(Capsule().stroke(Color.accentColor.opacity(0.6), lineWidth: 1))
+
+                Button {
+                    commitNewTag()
+                } label: {
+                    Text(T("加入")).font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Capsule().fill(Color.accentColor))
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    adding = false; newTag = ""
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    adding = true
+                    newTag = ""
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { newTagFocused = true }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "plus").font(.system(size: 9, weight: .bold))
+                        Text(T("新標籤")).font(.system(size: 11))
+                    }
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .overlay(Capsule().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                        .foregroundColor(.secondary))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func commitNewTag() {
+        let t = newTag.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+        if !t.isEmpty && !selected.contains(t) { selected.append(t) }
+        newTag = ""
+        adding = false
     }
 }
 
