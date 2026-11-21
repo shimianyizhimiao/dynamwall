@@ -343,6 +343,8 @@ struct SettingsView: View {
                 row(T("授權"), "PolyForm Noncommercial 1.0.0 + Share-Alike")
                 row(T("原始碼"), "github.com/shimianyizhimiao/macos-live-wallpaper")
                 row(T("系統需求"), T("macOS 13 以上・Apple Silicon 與 Intel"))
+                row(T("快速鍵"), "⌥⌘W " + T("開壁紙庫"))
+                row(T("結束"), T("不會出現在 Dock，也沒有結束選單；要結束請用活動監視器"))
             }
             .frame(width: 460, alignment: .leading)
 

@@ -7,6 +7,7 @@
 //  視窗放在「桌面圖示之下、桌面圖片之上」，所以桌面上按右鍵、點圖示都正常。
 import Cocoa
 import ServiceManagement
+import Carbon.HIToolbox
 import ImageIO
 import AVFoundation
 import WebKit
@@ -1029,6 +1030,11 @@ final class ScreenWallpaper {
 
 // MARK: ───────────────────────── App
 
+private func dynwallHotKeyHandler(_ next: EventHandlerCallRef?, _ event: EventRef?, _ ctx: UnsafeMutableRawPointer?) -> OSStatus {
+    DispatchQueue.main.async { Engine.shared.app?.showLibraryWindow() }
+    return noErr
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     var cfg = Config()
     var screens: [ScreenWallpaper] = []
@@ -1078,7 +1084,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
                                                          reason: "播放動態壁紙")
         say("APP-NAP disabled")
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
         Engine.shared.app = self
         ensureDirs()
         // 獨立打包的 App：第一次啟動時把自己內建的預設壁紙寫進設定（@bundle: 指向 App 內部檔案）
@@ -1142,6 +1148,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { _ = self.setAutoStart(on) }
         }
         buildMainMenu()
+        registerHotKey()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in self?.ensureStatusItemVisible() }
         if CommandLine.arguments.contains("--open-settings") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                 NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
@@ -1575,7 +1583,7 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
 
         let h = NSScreen.screens.first?.frame.height ?? 0
         let f = statusItem?.button?.window?.frame ?? .zero
-        let ok = f.height >= 20 && abs(f.maxY - h) < 3
+        let ok = f.height >= 20 && f.width >= 20
         say("STATUSITEM-CHECK attempt=\(attempt) frame=\(f.debugDescription) ok=\(ok)")
         if ok { return }
         if attempt >= 3 { say("STATUSITEM give-up（選單列目前是隱藏狀態，Dock 圖示仍可用）"); return }
@@ -1598,6 +1606,19 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
     }
 
 
+    // MARK: 全域熱鍵（沒有 Dock 圖示時，這是可靠的入口）
+
+    var hotKeyRef: EventHotKeyRef?
+
+    func registerHotKey() {
+        var gid = EventHotKeyID(signature: OSType(0x44574C4C), id: 1)   // 'DWLL'
+        let mods = UInt32(cmdKey | optionKey)
+        let status = RegisterEventHotKey(UInt32(kVK_ANSI_W), mods, gid, GetApplicationEventTarget(), 0, &hotKeyRef)
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), dynwallHotKeyHandler, 1, &spec, nil, nil)
+        say("HOTKEY ⌥⌘W register=\(status == noErr) (0=ok)")
+    }
+
     // MARK: 主選單（不然 App 在前景時選單列是空的，看起來像「選單列頂不出來」）
     func buildMainMenu() {
         let main = NSMenu()
@@ -1613,7 +1634,6 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         appMenu.addItem(withTitle: T("顯示壁紙庫"), action: #selector(showLibraryAction), keyEquivalent: "0")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: T("隱藏 DynWall"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: T("結束 DynWall"), action: #selector(quitApp), keyEquivalent: "q")
 
         // 檔案
         let fileItem = NSMenuItem(); main.addItem(fileItem)
@@ -1847,7 +1867,6 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         menu.addItem(action("開啟設定檔（config.json）", #selector(openConfig)))
         menu.addItem(.separator())
         menu.addItem(action("關於動態壁紙…", #selector(showAbout)))
-        menu.addItem(action("結束動態壁紙", #selector(quitApp)))
     }
 
     /// 關於：帶著作者與授權資訊（授權要求保留署名，散布時不得移除）
@@ -1860,7 +1879,7 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         授權：PolyForm Noncommercial 1.0.0 + Share-Alike 附加條款
         　　　（禁止商業使用；修改後散布必須以相同條款開源，不得閉源）
 
-        原始碼：https://github.com/shimianyizhimiao/dynwall
+        原始碼：https://github.com/shimianyizhimiao/macos-live-wallpaper
 
         本程式為個人自製專案，免費提供。若你是從付費管道拿到這支程式，
         那不是作者發布的版本。
@@ -2459,7 +2478,7 @@ extension AppDelegate {
             libraryWindow = w
             libraryModel.refresh()
         }
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
         NSApp.activate(ignoringOtherApps: true)
         libraryWindow?.makeKeyAndOrderFront(nil)
         libraryModel.refresh()
@@ -3065,7 +3084,7 @@ extension AppDelegate {
             settingsWindow = w
             say("SETTINGS-OPEN")
         }
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
         NSApp.activate(ignoringOtherApps: true)
         // 壁紙庫開著就用 sheet 貼在它上面：sheet 一定跟著壁紙庫出現在同一個 Space，
         // 不會像獨立視窗那樣被壓在後面（使用者會覺得「按了沒反應」）
