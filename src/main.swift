@@ -1234,6 +1234,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if CommandLine.arguments.contains("--tour-test") {
             runTourTest()
         }
+        if CommandLine.arguments.contains("--meta-test") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                if let it = self.libraryModel.items.first(where: { $0.kind == "video" }) {
+                    self.libraryModel.saveMeta(it, title: "測試名稱", tags: "甲, 乙")
+                    let f = SUPPORT_DIR.appendingPathComponent("meta.json")
+                    let txt = (try? String(contentsOf: f, encoding: String.Encoding.utf8)) ?? "nil"
+                    dbg("META-TEST id=\(it.id) file=\(txt.prefix(200))")
+                }
+            }
+        }
+        if CommandLine.arguments.contains("--edit-test") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                if let it = self.libraryModel.items.first(where: { $0.kind == "video" }) ?? self.libraryModel.items.first {
+                    self.libraryModel.beginEdit(it, .rename)
+                    dbg("EDIT-TEST open id=\(it.id)")
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.5) {
+                guard let w = self.libraryWindow, let v = w.contentView,
+                      let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+                v.cacheDisplay(in: v.bounds, to: rep)
+                if let d = rep.representation(using: .png, properties: [:]) {
+                    try? d.write(to: URL(fileURLWithPath: "/tmp/edit-sheet.png"))
+                    dbg("EDIT-TEST shot bytes=\(d.count)")
+                }
+            }
+        }
         if CommandLine.arguments.contains("--snap-test") {
             if let i = CommandLine.arguments.firstIndex(of: "--page"), i + 1 < CommandLine.arguments.count {
                 let name = CommandLine.arguments[i + 1]
@@ -1587,7 +1614,7 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         fileMenu.addItem(withTitle: T("加入 HTML…"), action: #selector(pickHTML), keyEquivalent: "")
         fileMenu.addItem(withTitle: T("加入圖片／GIF…"), action: #selector(pickImage), keyEquivalent: "")
         fileMenu.addItem(NSMenuItem.separator())
-        fileMenu.addItem(withTitle: T("關閉視窗"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileMenu.addItem(withTitle: T("關閉視窗"), action: #selector(closeWindowAction), keyEquivalent: "w")
 
         // 檢視
         let viewItem = NSMenuItem(); main.addItem(viewItem)
@@ -1622,7 +1649,6 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         let winMenu = NSMenu(title: T("視窗")); winItem.submenu = winMenu
         winMenu.addItem(withTitle: T("顯示壁紙庫"), action: #selector(showLibraryAction), keyEquivalent: "")
         winMenu.addItem(withTitle: T("最小化"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "")
-        NSApp.windowsMenu = winMenu
 
         // 說明
         let helpItem = NSMenuItem(); main.addItem(helpItem)
@@ -1631,8 +1657,17 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         helpMenu.addItem(withTitle: T("使用說明"), action: #selector(openDocsAction), keyEquivalent: "?")
 
         NSApp.mainMenu = main
-        say("MAINMENU items=\(main.items.count)")
+        var dump: [String] = []
+        for top in main.items {
+            dump.append("[TOP]\(top.title)")
+            for sub in top.submenu?.items ?? [] {
+                if !sub.isSeparatorItem { dump.append("\(top.title)>\(sub.title)") }
+            }
+        }
+        say("MAINMENU lang=\(L10n.current.rawValue) " + dump.joined(separator: " | "))
     }
+
+    @objc func closeWindowAction() { NSApp.keyWindow?.performClose(nil) }
 
     @objc func gotoHome() { libraryModel.page = .home; showLibraryWindow() }
     @objc func gotoStill() { libraryModel.page = .still; showLibraryWindow() }
@@ -2388,6 +2423,7 @@ extension AppDelegate {
             w.contentView?.frame = NSRect(origin: .zero, size: size)
             w.title = T("設定")
         }
+        buildMainMenu()
         buildStatusItem()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.ensureStatusItemVisible() }
         say("UI-REBUILD lang=\(L10n.current.rawValue)")

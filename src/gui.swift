@@ -16,6 +16,7 @@ import ImageIO
 final class WallpaperItem: Identifiable, ObservableObject {
     /// 卡片上顯示的名字：檔名清乾淨（去掉 (1)、底線、副檔名）
     var displayTitle: String {
+        if let c = customTitle, !c.trimmingCharacters(in: .whitespaces).isEmpty { return c }
         var t = title
         if let dot = t.lastIndex(of: "."), t.distance(from: t.startIndex, to: dot) > 3,
            ["mp4", "mov", "m4v", "png", "jpg", "jpeg", "heic", "gif", "html"].contains(t.suffix(4).lowercased())
@@ -42,11 +43,14 @@ final class WallpaperItem: Identifiable, ObservableObject {
     let ref: String
     let title: String
     let canDelete: Bool
+    @Published var customTitle: String?
+    @Published var tags: [String] = []
     @Published var subtitle: String
     @Published var thumb: NSImage?
     @Published var badge: String?
 
     init(id: String, kind: String, ref: String, title: String, subtitle: String, canDelete: Bool) {
+        if let m = MetaStore.meta(id) { self.customTitle = m.title; self.tags = m.tags ?? [] }
         self.id = id
         self.kind = kind
         self.ref = ref
@@ -353,6 +357,26 @@ final class LibraryModel: ObservableObject {
 
     let hotWords = ["星雲", "極光", "太空", "雨", "賽博", "城市", "山", "月"]
 
+    // MARK: 改名 / 標籤（選填）
+    @Published var editingItem: WallpaperItem?
+    @Published var editMode: EditMode = .rename
+    enum EditMode { case rename, tags }
+
+    func beginEdit(_ it: WallpaperItem, _ mode: EditMode) {
+        editMode = mode
+        editingItem = it
+    }
+
+    func saveMeta(_ it: WallpaperItem, title: String, tags: String) {
+        let list = tags.split(whereSeparator: { $0 == "," || $0 == "，" || $0 == " " || $0 == "#" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        MetaStore.set(it.id, title: title, tags: list)
+        it.customTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : title
+        it.tags = list
+        editingItem = nil
+        objectWillChange.send()
+    }
+
     func toggleFav(_ id: String) {
         if favorites.contains(id) { favorites.remove(id) } else { favorites.insert(id) }
         UserDefaults.standard.set(Array(favorites), forKey: "favIDs")
@@ -392,7 +416,7 @@ final class LibraryModel: ObservableObject {
             case "我的 HTML": okFilter = it.kind == "web"
             default: okFilter = true
             }
-            let okSearch = search.isEmpty || it.title.localizedCaseInsensitiveContains(search)
+            let okSearch = search.isEmpty || it.title.localizedCaseInsensitiveContains(search) || (it.customTitle ?? "").localizedCaseInsensitiveContains(search) || it.tags.contains { $0.localizedCaseInsensitiveContains(search) }
             return okFilter && okSearch
         }
         switch sort {
@@ -722,6 +746,8 @@ struct RowCard: View {
     let onTap: () -> Void
     let onApply: () -> Void
     let onReveal: () -> Void
+    var onRename: () -> Void = {}
+    var onTags: () -> Void = {}
     @State private var hover = false
 
     private var badge: String {
@@ -877,6 +903,11 @@ struct LibraryView: View {
                 Engine.shared.pickLanguage(lang.rawValue)
             } }
             if tour.active { TourOverlay(tour: tour) }
+        }
+        .sheet(item: $model.editingItem) { it in
+            EditItemSheet(item: it, mode: model.editMode) { n, t in
+                model.saveMeta(it, title: n, tags: t)
+            }
         }
         .coordinateSpace(name: "dynwall-window")
         .onPreferenceChange(TourAnchorKey.self) { r in
@@ -1271,7 +1302,9 @@ struct LibraryView: View {
                                  fav: model.isFav(it.id),
                                  onTap: { model.apply(it) },
                                  onFav: { model.toggleFav(it.id) },
-                                 onReveal: { model.reveal(it) })
+                                 onReveal: { model.reveal(it) },
+                                 onRename: { model.beginEdit(it, .rename) },
+                                 onTags: { model.beginEdit(it, .tags) })
                     }
                 }
             }
@@ -1292,6 +1325,8 @@ struct GridCard: View {
     let onTap: () -> Void
     let onFav: () -> Void
     let onReveal: () -> Void
+    var onRename: () -> Void = {}
+    var onTags: () -> Void = {}
     @State private var hover = false
     @State private var res = ""
 
@@ -1327,22 +1362,7 @@ struct GridCard: View {
                             .padding(8)
                     }
                 }
-                .overlay(alignment: .bottom) {
-                    HStack(spacing: 8) {
-                        Text(item.displayTitle)
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        Image(systemName: fav ? "heart.fill" : "heart")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(fav ? Color(red: 1, green: 0.35, blue: 0.5) : .white.opacity(0.75))
-                            .contentShape(Rectangle())
-                            .onTapGesture { onFav() }
-                            .help(fav ? T("取消最愛") : T("加入最愛"))
-                    }
-                    .padding(.horizontal, 10).padding(.bottom, 9)
-                }
+                .overlay(alignment: .bottom) { bottomBar.padding(.horizontal, 10).padding(.bottom, 9) }
                 .overlay(alignment: .center) {
                     if hover && !current {
                         Image(systemName: "play.fill")
@@ -1365,10 +1385,44 @@ struct GridCard: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .contextMenu {
+            Button(T("重新命名…")) { onRename() }
+            Button(T("編輯標籤…")) { onTags() }
+            Divider()
             Button(T("在 Finder 顯示")) { onReveal() }
             Button(fav ? T("取消最愛") : T("加入最愛")) { onFav() }
         }
         .task(id: item.id) { res = await Resolution.label(item) }
+    }
+
+    private var bottomBar: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if !item.tags.isEmpty { tagRow }
+            HStack(spacing: 8) {
+                Text(item.displayTitle)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: fav ? "heart.fill" : "heart")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(fav ? Color(red: 1, green: 0.35, blue: 0.5) : .white.opacity(0.75))
+                    .contentShape(Rectangle())
+                    .onTapGesture { onFav() }
+                    .help(fav ? T("取消最愛") : T("加入最愛"))
+            }
+        }
+    }
+
+    private var tagRow: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(item.tags.prefix(2)), id: \.self) { t in
+                Text("#" + t)
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+                    .padding(.horizontal, 5).padding(.vertical, 1.5)
+                    .background(Capsule().fill(Color.white.opacity(0.16)))
+            }
+        }
     }
 
     private var kindLabel: String {
@@ -1377,6 +1431,54 @@ struct GridCard: View {
         case "image": return item.ref.lowercased().hasSuffix(".gif") ? "GIF" : T("靜態")
         case "web": return "HTML"
         default: return T("內建")
+        }
+    }
+}
+
+
+// MARK: 改名 / 標籤（選填）
+
+struct EditItemSheet: View {
+    @ObservedObject var item: WallpaperItem
+    let mode: LibraryModel.EditMode
+    let onSave: (String, String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var tags = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(mode == .rename ? T("重新命名") : T("編輯標籤"))
+                .font(.system(size: 15, weight: .bold))
+            Text(T("都選填。名字只影響顯示，不會改到檔案。"))
+                .font(.system(size: 10.5)).foregroundColor(.secondary)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(T("名稱")).font(.system(size: 11, weight: .medium))
+                TextField(T("留空就用原本的檔名"), text: $name)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 12))
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(T("標籤（用逗號分隔）")).font(.system(size: 11, weight: .medium))
+                TextField(T("例：賽博, 夜景, 4K"), text: $tags)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 12))
+                Text(T("標籤可以用搜尋列找，卡片上會顯示前兩個。"))
+                    .font(.system(size: 9.5)).foregroundColor(.secondary)
+            }
+
+            HStack {
+                Spacer()
+                Button(T("取消")) { dismiss() }
+                Button(T("儲存")) { onSave(name, tags); dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 400)
+        .onAppear {
+            name = item.customTitle ?? ""
+            tags = item.tags.joined(separator: ", ")
         }
     }
 }
