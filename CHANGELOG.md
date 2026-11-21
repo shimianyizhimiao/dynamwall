@@ -1,5 +1,18 @@
 # 更新紀錄
 
+## v0.9.19
+
+### 修：鎖定畫面又變回舊圖
+
+原因：`scheduleLockSync()` 這條路**從來沒有被呼叫**（v0.9.6 拿掉鎖定動態時一起斷了），所以系統設定裡的 `Idle`（鎖定畫面）一直停在舊的 `iwallpaper` 極光圖 —— `LastSet` 還是 5 月。
+
+修法：
+- 套用壁紙後、啟動後、鎖定前都會同步一次
+- 同步改成遞迴處理**所有**含 `Desktop`/`Idle` 的節點（`SystemDefault`、`Spaces`、`Displays`），不只 `Displays` —— 之前只改 `Displays` 所以沒生效
+- 寫入後重啟 `WallpaperAgent`，2.5 秒後讀回檔案確認 `same=true`
+
+實測：`STORE idle←desktop nodes=660`，`Index.plist` 裡 Desktop 與 Idle 都指向同一張 `posters/poster-...png`。
+
 ## v0.9.18
 
 ### 改成純背景 App：沒有 Dock 圖示、只靠選單列／熱鍵，結束只能用活動監視器

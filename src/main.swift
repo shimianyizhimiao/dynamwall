@@ -1327,6 +1327,7 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.showLibraryWindow() }
         }
         say("READY screens=\(screens.count) kind=\(cfg.kind) ref=\(cfg.ref) level=\(screens.first?.window.level.rawValue ?? 0)")
+        if cfg.lockPoster { DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in self?.syncLockToDesktop() } }
         startParallax()
         startRotation()
     }
@@ -1444,6 +1445,7 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         if pause && (cfg.poster || cfg.lockPoster) {
             for sw in screens { sw.writeDesktopPoster(nil, force: true) }
             say("LOCK-POSTER refreshed screens=\(screens.count)")
+            if cfg.lockPoster { syncLockToDesktop() }
         }
         // 醒來／解鎖後，系統有時會把桌布改回舊圖 → 重新套一次我們的定格圖（60 秒內不重複做，避免一直重畫）
         if !pause && (cfg.poster || cfg.lockPoster) && Date().timeIntervalSince(lastPosterRefreshAt) > 60 {
@@ -1899,6 +1901,7 @@ try? data.write(to: URL(fileURLWithPath: "/tmp/library-snap.png"))
         saveConfig(cfg)
         for sw in screens { sw.apply(cfg) }
         say("SOURCE kind=\(kind) ref=\(ref)")
+        if cfg.lockPoster { scheduleLockSync() }
     }
 
     @objc func pickVideo() {
@@ -2621,31 +2624,54 @@ extension AppDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 6.0, execute: w)
     }
 
-    /// 把每個螢幕「鎖定畫面（Idle）」設成跟桌面同一張 —— 打密碼時就不會再看到舊圖
+    /// 遞迴把所有「同時有 Desktop/Idle」的節點同步（SystemDefault / Spaces / Displays 都要）
+    private func syncIdleTree(_ node: Any) -> (Any, Int) {
+        if var d = node as? [String: Any] {
+            var changed = 0
+            if let desk = d["Desktop"] as? [String: Any], var idle = d["Idle"] as? [String: Any],
+               let dc = desk["Content"] as? [String: Any] {
+                idle["Content"] = dc
+                if let ls = desk["LastSet"] { idle["LastSet"] = ls }
+                d["Idle"] = idle
+                changed += 1
+            }
+            for (k, v) in d {
+                let (nv, c) = syncIdleTree(v)
+                if c > 0 { d[k] = nv; changed += c }
+            }
+            return (d, changed)
+        }
+        if let arr = node as? [Any] {
+            var out: [Any] = []; var changed = 0
+            for v in arr { let (nv, c) = syncIdleTree(v); out.append(nv); changed += c }
+            return (out, changed)
+        }
+        return (node, 0)
+    }
+
+    /// 把「鎖定畫面（Idle）」設成跟桌面同一張 —— 打密碼時就不會再看到舊圖
     @discardableResult
     func syncLockToDesktop() -> Bool {
-        guard var obj = readWallpaperStore() else { say("STORE read failed"); return false }
-        guard var displays = obj["Displays"] as? [String: Any] else { return false }
-        var changed = 0
-        for (id, value) in displays {
-            guard var v = value as? [String: Any],
-                  var desk = v["Desktop"] as? [String: Any],
-                  var idle = v["Idle"] as? [String: Any] else { continue }
-            guard var deskContent = desk["Content"] as? [String: Any],
-                  var idleContent = idle["Content"] as? [String: Any] else { continue }
-            idleContent["Choices"] = deskContent["Choices"]
-            if let opt = deskContent["EncodedOptionValues"] { idleContent["EncodedOptionValues"] = opt }
-            idle["Content"] = idleContent
-            v["Idle"] = idle
-            displays[id] = v
-            changed += 1
-        }
-        guard changed > 0 else { say("STORE 沒有可同步的螢幕"); return false }
-        obj["Displays"] = displays
+        guard let obj = readWallpaperStore() else { say("STORE read failed"); return false }
+        let (patched, changed) = syncIdleTree(obj)
+        guard changed > 0, let out = patched as? [String: Any] else { say("STORE 沒有可同步的節點"); return false }
         backupWallpaperStore()
-        let ok = writeWallpaperStore(obj)
-        say("STORE idle←desktop screens=\(changed) ok=\(ok)")
-        return ok
+        guard writeWallpaperStore(out) else { return false }
+        restartWallpaperAgent()
+        // 讀回來確認（WallpaperAgent 有時會把檔案改回舊值）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            guard let self, let back = self.readWallpaperStore(),
+                  let disp = back["Displays"] as? [String: Any] else { return }
+            for (_, v) in disp {
+                guard let d = v as? [String: Any],
+                      let desk = d["Desktop"] as? [String: Any], let idle = d["Idle"] as? [String: Any],
+                      let dc = desk["Content"] as? [String: Any], let ic = idle["Content"] as? [String: Any] else { continue }
+                let same = String(describing: dc["Choices"]).suffix(40) == String(describing: ic["Choices"]).suffix(40)
+                dbg("STORE idle=desktop same=\(same)")
+            }
+        }
+        say("STORE idle←desktop nodes=\(changed)")
+        return true
     }
 
     /// 把系統桌布設定還原成 App 第一次改之前的樣子
